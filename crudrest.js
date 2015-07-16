@@ -64,6 +64,7 @@ function getpersister (otype, res) {
    // override.
    else {
      var jerr = {"ok" : 0, "msg": "Not a valid entity type."};
+     jerr.msg += "Type:" + otype + ". Total types:" + Object.keys(perscache).length;
      res.send(jerr);
    }
    console.log("Invalid entity type requested: " + otype);
@@ -328,7 +329,8 @@ function crudgetsingle (req, res) { //
 //router.get(/^\/(\w+)\/?/,
 // module.exports.crudgetmulti = 
 function crudgetmulti (req, res)  { // 
-  var otype = req.params[0];
+  // var otype = req.params[0]; // OLD !
+  var otype = req.params['type'];
   var smodel = getpersister(otype, res);
   if (!smodel) {return;}
   var filter = {};
