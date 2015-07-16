@@ -70,15 +70,29 @@ With the Express the crudrest also depends on 'body-parser' (and setting up
 the middleware bodyParser.json() to parse JSON HTTP request bodies for
 POST/PUT methods).
 
-References:
+## Limitations
 
-- http://expressjs.com/guide/routing.html
-- http://expressjs.com/4x/api.html#router
+
+### PUT / POST
+
+When sending new data (POST => INSERT) or updating data (PUT => UPDATE), nested structures (e.g. arrays of chile objects)
+are not officially supported for now (actually Sequelize has ways to cope with this, so stay tuned).
+
+Also the pre-hook mechanism is not supported yet (in other words JSON data payload cannot be currently preprocessed).
+
+### GET (single entry or multiple)
+
+SQL JOINS are not supported.
 
 ## Generating JSDoc3 Docs
 
- In the project top directory run jsdoc (add -R README.md):
+In the project top directory run jsdoc (add -R README.md):
 
     jsdoc crudrest.server.js crudrest.js  -c conf.json
 
- More on JSDoc: http://usejsdoc.org/
+More on JSDoc: http://usejsdoc.org/
+
+## References:
+
+- http://expressjs.com/guide/routing.html
+- http://expressjs.com/4x/api.html#router
