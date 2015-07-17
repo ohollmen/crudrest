@@ -1,6 +1,9 @@
 
 /* @file
 * All JSDoc "Home" content moved to README.md
+* @todo Make logging to console be optional / supressible.
+* # Developer geared info
+* - Primary key for smodel is available in smodel.primaryKeyAttribute
 */
 'use strict';
 // TODO: Change routing URL:s
@@ -25,9 +28,14 @@ function getidfilter (smodel, req) {
    var idf = {where: whereid, limit: 1};
    return idf;
 }
-function kvfilter (req) {
-   // Find k-v pairs in req
+// Work rawfilter to Sequelize format filter.
+// TODO: Alow wildcarding, etc.
+function kvfilter (rawfilter) { // (req)
+   // TODO: Find k-v pairs in req ?
+   // Validate as Object
    
+   // Wrap in Sequelize filter format
+   return {where: rawfilter}
 }
 // OLD: ... HTTP response object and send a desired JSON/REST response indicating the error.
 /** Set custom error / exception handling callback.
@@ -120,7 +128,8 @@ function opt_or_ac (req, res) { //
    if (!optinfo) {throw "No ta entry for " + ta + " in " + taidx + "(Use taidx() )";} // TODO: Array
    // Support static / constant options (rawlist, keyvallist)
    if (Array.isArray(optinfo[1])) {
-      res.send(optinfo[1]);return;
+      // 
+      res.send(JSON.stringify(optinfo[1]));return;
    }
    // Check file (missing last / 3) && !optinfo[3]
    //if (optinfo[1].indexOf('/') ) {
@@ -320,11 +329,19 @@ function cruddelete (req, res) { //
     jr.ok = num;
     jr.idval = idval;
     if (!num) {jr.msg = "No such entry: " + idval;}
-    console.log("Deleted: " + num);
+    console.log("Deleted (count): " + num);
     // if (!num) {return;} // Earlier exception
     var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
     res.send(d);
   });
+  // Soft delete (need attr and value)
+  // if (conf.softdel && smodel.hasAttr(sdattr)) {
+  //   smodel.update(softdel, idfilter)
+  //   .catch(function (ex) {sendcruderror("Failed to SoftDelete",ex,res);})
+  //   .then(function (num) {
+  //      
+  //   });
+  // }
 }
 
 // 2 cases for GET
@@ -377,12 +394,14 @@ function crudgetmulti (req, res)  { //
   // If parameters, add to filter here.
   // TODO: Check type of Object
   if (req.query && Object.keys(req.query).length) {
-     var keys = Object.keys(req.query);
-     console.log("Have query: " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
-     keys.forEach(function (k) {filter[k] = req.query[k];});
-     console.log("Assembled filter: " + JSON.stringify(filter));
+    var keys = Object.keys(req.query);
+    console.log("Have query: " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
+    keys.forEach(function (k) {filter[k] = req.query[k];});
+    // Wrap in Sequelize compatible (format is more complex than meets the eye)
+    filter = kvfilter(filter);
+    console.log("Assembled filter (Seq): " + JSON.stringify(filter));
   }
-  else {console.log("DO NOT Have query (no keys)");}
+  else {console.log("DO NOT Have query filter (no keys found)");}
   smodel.findAll(filter)
   // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
   .catch(function (ex) {sendcruderror("No Entries Found",ex,res);})
