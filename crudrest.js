@@ -8,7 +8,8 @@
 var express = require('express');
 var router = express.Router({caseSensitive: 1});
 var perscache = {};
-var errorhandler_pers = null;
+var errcb = null;
+var respcb = null;
 var taidx = {}; // TODO: Move
 /** Internal static method to create ID based filter for Sequelize CRUD Operations.
  * The crudrest module convention requires to have parameter ":idval"
@@ -28,19 +29,24 @@ function kvfilter (req) {
    // Find k-v pairs in req
    
 }
+// OLD: ... HTTP response object and send a desired JSON/REST response indicating the error.
 /** Set custom error / exception handling callback.
-* The callback should accept parameters object type name and HTTP response object
-* and send a desired JSON/REST response indicating the error.
+* The callback should accept parameters object type name and error message and create the
+* (error) message structure sent back to client as JSON.
 * @param {function} f - Error callback function
+* @example
+* crudrest.seterrhdlr(function (typename, errmsg) {
+*   return {"status": "err", "msg": errmsg + ". Type: " + typename};
+* });
 */
-function errhdlr(f) {
+function seterrhdlr(f) {
    // Check that we fed a function
    if (typeof(f) != "function") {return;}
-   errorhandler_pers = f;
+   errcb = f;
 }
 /** Internal static method to get Persister by entity type name.
  For a requests for invalid entity types send an REST Error.
- If module variable errorhandler_pers is set to a callback handler, this callback is used to formulate
+ If module variable errcb is set to a callback handler, this callback is used to formulate
  the error to res (Node.js HTTP response).
  If this returns false value (no persister), the calling Node handler should plainly return
  to end the response as all the response communication has already been done here.
@@ -55,22 +61,42 @@ function getpersister (otype, res) {
    // 
    if (pers = perscache[otype]) {return pers;}
    // Invalid persister, custom error handling. Ensure request is ended.
-   if (errorhandler_pers) {
-     errorhandler_pers(otype, res);
-     res.end();
-     // return null;
+   var emsg = "Not a valid entity type.";
+   var jerr = {"ok" : 0, "msg": emsg};
+   // Override jerr ?
+   if (errcb) {
+     
+     jerr = errcb(otype, emsg);
+     
    }
-   // General / default error message generation (Use errorhandler_pers) to
+   // General / default error message generation (Use errcb) to
    // override.
    else {
-     var jerr = {"ok" : 0, "msg": "Not a valid entity type."};
-     jerr.msg += "Type:" + otype + ". Total types:" + Object.keys(perscache).length;
-     res.send(jerr);
+     
+     // jerr.msg += "Type:" + otype + ". Total types:" + Object.keys(perscache).length;
+     
    }
+   res.send(jerr);
    console.log("Invalid entity type requested: " + otype);
    return null;
 }
-
+/** Set a callback to transform response to a custom JSON topology.
+* Custom here means that instead of the "raw" object the handler could return the data "wrapped"
+* with one extra JSON (Object) layer (the choice of layering is yours).
+* Whatever callback returns is serialized (as JSON) to client.
+* @example
+*     // Transform the JSON structure slightly. Add "status" layer.
+*     crudrest.setrespcb(function (origdata, op) {
+*       return {"status": "ok", "data": origdata};
+*     });
+* 
+* The 2nd parameter "op" is one of: 'create','update','retrieve','delete'.
+*/
+function setrespcb (cb) {
+   // Must be function
+   if (typeof(cb) != "function") {return;}
+   respcb = cb;
+}
 
 /** Temporary AC handler.
  * Lookup options source from server side config.
@@ -82,7 +108,6 @@ function getpersister (otype, res) {
  *     // Do GET on http://myapp/ac/?ta=projects.projectid
  *     wget -O opts.json http://myapp/ac/?ta=projects.projectid
  */
-// router.get(/^\/ac\/?/,
 function opt_or_ac (req, res) { // 
    "use strict";
    var ta = req.query["ta"]; // OR: req.params["ta"]
@@ -157,8 +182,14 @@ function opt_or_ac (req, res) { //
    });
    
 }
-//);
-
+/** Internal method to send exception based Sequelize error messages to client.
+ * Message is also replicated on server console.
+ */
+function sendcruderror(basemsg,ex,res) {
+   var jr = {"ok": 0, "msg": basemsg + ": " + ex.message};
+   res.send(jr);
+   console.log(jr.msg);
+}
 /************************** CRUD ***************************/
 
 // Assign handler(s) for REST URL
@@ -170,12 +201,10 @@ function opt_or_ac (req, res) { //
  * @example
  * var crudrest = require('crudrest');
  * // ...
- * router.get("/:type/", crudrest.crudpost);
+ * router.post("/:type/", crudrest.crudpost);
  */
 // Note: ER_BAD_FIELD_ERROR: Unknown column 'id' in 'field list'
 // ... Table does not have primary key
-//router.post(/^\/(\w+)\/?/,
-//module.exports.crudpost = 
 function crudpost(req, res) { // 
   res.setHeader('Content-Type', 'text/json');
   console.log("Posted JSON: " + JSON.stringify(req.body, null, 2));
@@ -193,27 +222,28 @@ function crudpost(req, res) { //
   // if (f) {f( req.body, req, smodel);} // apply ...
   // Traditional try / catch will NOT work here
   smodel.create(req.body)
-  .catch(function (ex) {jr.ok = 0;jr.msg = "Creation problem: "+ex.message;console.log(jr.msg);res.send(jr);})
+  // .catch(function (ex) {jr.ok = 0;jr.msg = "Creation problem: "+ex.message;console.log(jr.msg);res.send(jr);})
+  .catch(function (ex) {sendcruderror("Creation problem",ex,res);})
   .then(function (ent) {
     if (!ent) {console.log("Likely earlier exception");return;} // Earlier exception
     console.log("Saved: " + JSON.stringify(ent));
-    jr.data = ent;
-    res.send(jr);
+    //jr.data = ent; // Hard default
+    var d = respcb ? respcb(ent, "create") : ent;
+    res.send(d);
   });
 }
-//);
+
 
 // Recommended route pattern: /^\/(\w+)\/(\d+)/ (e.g. "/people/3")
+// http://stackoverflow.com/questions/8158244/how-to-update-a-record-using-sequelize-for-node
 /** Update single entry of a type by id by HTTP PUT.
  * Route pattern must have params: ":type", ":idval"
- * 
+ * REST Response will have the complete entry after update in it.
  * @example
  * var crudrest = require('crudrest');
  * // ...
- * router.get("/:type/:idval", crudrest.crudput);
+ * router.put("/:type/:idval", crudrest.crudput);
  */
-//router.put(/^\/(\w+)\/(\d+)/,
-// module.exports.crudput = 
 function crudput (req, res) { // 
   
   var jr = {'ok': 1};
@@ -229,21 +259,32 @@ function crudput (req, res) { //
   var idfilter = getidfilter(smodel, req);
   console.log("PUT: Update Triggered on " + idval);
   console.log(req.body);
-  // Need to find entry first (share id filter)
+  // Need to find entry first (share id filter with update)
   smodel.find(idfilter)
-  .catch(function (ex) {jr.ok = 0;jr.msg = "No entry: " + ex.message;res.send(jr);})
+  //.catch(function (ex) {jr.ok = 0;jr.msg = "No entry: " + ex.message;res.send(jr);})
+  .catch(function (ex) {sendcruderror("No entry for update",ex,res);})
   .then(function (ent) {
-  console.log("Seems to exist: " + idval);
-  smodel.update(req.body, idfilter) // options.limit (mysql)
-  .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
-  .then(function (ent) {
-    if (!ent) {console.log("PUT: Exception ?");return;} // Earlier exception
-    console.log("Updated: " + JSON.stringify(ent));
-    res.send(jr);
-  }); // end of update/then
+    console.log("Seems to exist for update): " + idval);
+    smodel.update(req.body, idfilter) // options.limit (mysql)
+    // Alternative method (~2012)
+    // ent.updateAttributes(req.body).success(...)
+    // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+    .catch(function (ex) {sendcruderror("Update failure",ex,res);})
+    // This seems to gain: [1]
+    .then(function (ent) {
+      if (!ent) {console.log("PUT: Exception ?");return;} // Earlier exception
+      // Need to find again ? Need to reconfig idfilter ?
+      smodel.find(idfilter)
+      .catch(function (ex) {sendcruderror("Updated ent reload failure",ex,res);})
+      .then(function (ent) {
+        console.log("Updated: " + JSON.stringify(ent));
+        var d = respcb ? respcb(ent, "update") : ent;
+        res.send(d);
+      }); // end of re-fetch/then
+    }); // end of update/then
   }); // end of find/then
 }
-//);
+
 
 //  Recommended route pattern: /^\/(\w+)\/(\d+)/ (e.g "/people/3")
 /** Delete single entry of a type by id by HTTP DELETE.
@@ -253,16 +294,14 @@ function crudput (req, res) { //
  * @example
  * var crudrest = require('crudrest');
  * // ...
- * router.get("/:type/:idval", crudrest.cruddelete);
+ * router.delete("/:type/:idval", crudrest.cruddelete);
  */
-//router.delete(/^\/(\w+)\/(\d+)/,
-// module.exports.cruddelete = 
 function cruddelete (req, res) { // 
   
   var jr = {'ok': 1};
   var otype = req.params['type'];
   var idval = req.params['idval']; // Keep for error handling
-  console.log("DELETE: entry(id) " + idval + "of type: " + otype);
+  console.log("DELETE: entry(id) " + idval + " of type: " + otype);
   console.log(req.body);
   var smodel = getpersister(otype, res);
   if (!smodel) {return;}
@@ -275,16 +314,19 @@ function cruddelete (req, res) { //
   // Need to check exists first ?
   // Need a flag for exception ?
   smodel.destroy(idfilter)
-  .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+  // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+  .catch(function (ex) {sendcruderror("Failed to Delete",ex,res);})
   .then(function (num) {
     jr.ok = num;
+    jr.idval = idval;
     if (!num) {jr.msg = "No such entry: " + idval;}
     console.log("Deleted: " + num);
     // if (!num) {return;} // Earlier exception
-    res.send(jr);
+    var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
+    res.send(d);
   });
 }
-//);
+
 // 2 cases for GET
 // Recommended route pattern: /^\/(\w+)\/(\d+)/
 
@@ -296,8 +338,6 @@ function cruddelete (req, res) { //
  * // ...
  * router.get("/:type/:idval", crudrest.crudgetsingle);
  */
-//router.get(/^\/(\w+)\/(\d+)/,
-// module.exports.crudgetsingle = 
 function crudgetsingle (req, res) { // 
   var jr = {'ok': 1};
   var otype = req.params['type'];
@@ -307,16 +347,18 @@ function crudgetsingle (req, res) { //
   var idfilter = getidfilter(smodel, req);
   console.log("GET single by: " + JSON.stringify(idfilter));
   smodel.find(idfilter)
-  .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+  //.catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+  .catch(function (ex) {sendcruderror("No Entry Found",ex,res);})
   .then(function (ent) {
     //jr.ok = num;
     //if (!num) {jr.msg = "No such entry: " + idval;}
     console.log("Got single: " + JSON.stringify(ent));
     // if (!num) {return;} // Earlier exception
-    res.send(ent);
+    var d = respcb ? respcb(ent, "retrieve") : ent;
+    res.send(d);
   });
 }
-//);
+
 // Example route pattern: /^\/(\w+)\/?/
 /** Get multiple (default all) of type by HTTTP GET.
  * Route pattern must have params: ":type"
@@ -326,8 +368,6 @@ function crudgetsingle (req, res) { //
  * // ...
  * router.get("/:type", crudrest.crudgetmulti);
  */
-//router.get(/^\/(\w+)\/?/,
-// module.exports.crudgetmulti = 
 function crudgetmulti (req, res)  { // 
   // var otype = req.params[0]; // OLD !
   var otype = req.params['type'];
@@ -344,27 +384,29 @@ function crudgetmulti (req, res)  { //
   }
   else {console.log("DO NOT Have query (no keys)");}
   smodel.findAll(filter)
-  .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+  // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+  .catch(function (ex) {sendcruderror("No Entries Found",ex,res);})
   .then(function (arr) {
     // if (!arr) {jr.msg = "No result set array !"; res.send(jr);}
     console.log("Got multiple: " + arr.length + " ents.");
-    res.send(arr);
+    var d = respcb ? respcb(arr, "retrieve") : arr;
+    res.send(d);
   });
 }
-//);
+
 /** Setup a good default router with default router URL:s.
  * Mainly used for the example app bundled in to module distribution.
  * For more granular routing setup do a similar reouter calls directly in your own app.
  * You can still have all routes setup here under a sub-path (coordinated by express routing, see
  * example below).
  * @example
- * var router = express.Router({caseSensitive: 1});
- * crudrest.defaultrouter(router);
- * // ...
- * // Directly under root
- * app.use('/', router);
- * // ... or under special path
- * // app.use('/specialpath', router);
+ *     var router = express.Router({caseSensitive: 1});
+ *     crudrest.defaultrouter(router);
+ *     // ...
+ *     // Directly under root
+ *     app.use('/', router);
+ *     // ... or under special path
+ *     // app.use('/specialpath', router);
  */
 function defaultrouter(router) {
    if (!router) {  router = express.Router({caseSensitive: 1}); }
@@ -422,5 +464,6 @@ module.exports.crudgetsingle = crudgetsingle;
 module.exports.crudgetmulti = crudgetmulti;
 
 module.exports.opt_or_ac = opt_or_ac;
-
+module.exports.setrespcb = setrespcb;
+module.exports.seterrhdlr = seterrhdlr;
 module.exports.taidx = function (pc) {taidx = pc;}

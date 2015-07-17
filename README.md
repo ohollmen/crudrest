@@ -86,9 +86,9 @@ SQL JOINS are not supported.
 
 ## Generating JSDoc3 Docs
 
-In the project top directory run jsdoc (add -R README.md):
+In the project top directory run jsdoc:
 
-    jsdoc crudrest.server.js crudrest.js  -c conf.json
+    jsdoc crudrest.server.js crudrest.js -R README.md -c conf.json
 
 More on JSDoc: http://usejsdoc.org/
 
