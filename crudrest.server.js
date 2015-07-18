@@ -66,7 +66,7 @@ var crudrest = require('./crudrest'); // crudrest.js
 // NEW:
 
 crudrest.setperscache(perscache); // ORM cache / pool
-if (taidx) {crudrest.taidx(taidx);}
+if (taidx) {crudrest.settaidx(taidx);}
 
 // Boilerplate express server setup
 // var http = require('http');
