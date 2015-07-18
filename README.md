@@ -54,15 +54,57 @@ This can be then mapped into an index by entity types (see "tableName" below) th
      // Let crudrest know about your config
      crudrest.setperscache(perscache);
 
-## Customizing REST Exception
+## Associating Server URL routes to crudrest handlers
 
-The REST eror / exception response is customizable by setting the exception callback via:
+Example above (on top) showed a way to associate URL:s in a default way
 
-    // Set error handler
-    crudrest.errhdlr(function (otype, res) {
-      res.json({"status": "waybad", "code": -1, "message": "No such object:" + otype});
-      return;
+    var router = express.Router({caseSensitive: 1});
+    crudrest.defaultrouter(router);
+    app.use('/ents', crudrest);
+
+To gain more control and actually "see" the associations you can do router assignments individually
+(loading and initialization of crudrest and instantiation of Express router are left out):
+
+    // All crudrest handlers are "mounted" under "/crud/"
+    router.post  ("/crud/:type", crudrest.crudpost); // POST 1 arg: type
+    router.put   ("/crud/:type/:idval", crudrest.crudput); // PUT 2 args: type,id
+    router.delete("/crud/:type/:idval", crudrest.cruddelete); // DELETE 2 args: type,id
+    router.get   ("/crud/:type/:idval", crudrest.crudgetsingle); // GET (single) 2 args: type,id
+    router.get   ("/crud/:type", crudrest.crudgetmulti); // GET(multiple) 1 arg: type
+
+If you are bit on the hard-core side you'll probably want to do something like above
+(its still relatively terse).
+
+## Customizing REST Responses
+
+The rest response format is (even) much less "standardized" or "de-facto" than request.
+Crudrest allows one to customize the response for success and error cases with an intercepting callbacks
+(applicable to all CRUD methods).
+The REST error / exception response is customizable by setting the exception callback via:
+
+    // Set error / exception handler
+    crudrest.seterrhdlr(function (typename, errmsg) {
+      return {"status": "err", "msg": errmsg + ". Type: " + typename};
     });
+    // Set success response handler
+    crudrest.setrespcb(function (origdata, op) {
+      return {"status": "ok", "data": origdata};
+    });
+
+## Intercepting CRUD requests
+
+Instead of assigning handlers directly URL routes, you can allow yourself to intercept
+the request:
+
+    router.get("/crud/:type/:idval", function (req, res) {
+       // Do something here
+       jerr = {"ok": 0, "msg":"Bad activity intercepted"};
+       if (!validtype(req.params['type'])) {jerr.msg += ". Weird entity type requested !";req.json(jerr);return;}
+       if (!valididformat(req.params['idval'])) {jerr.msg += ". Faulty ID format";req.json(jerr);return;}
+       crudrest.crudgetsingle(req, res); // .. Only then call
+    });
+
+Now handler crudrest.crudgetsingle is indirectly assigned to URL route.
 
 ## Notes on Dependencies
 
@@ -75,14 +117,20 @@ POST/PUT methods).
 
 ### PUT / POST
 
-When sending new data (POST => INSERT) or updating data (PUT => UPDATE), nested structures (e.g. arrays of chile objects)
-are not officially supported for now (actually Sequelize has ways to cope with this, so stay tuned).
+When sending new data (POST => INSERT) or updating data (PUT => UPDATE), nested structures
+(e.g. arrays of child objects) are not officially supported for now (actually Sequelize has
+ways to cope with this, so stay tuned).
 
 Also the pre-hook mechanism is not supported yet (in other words JSON data payload cannot be currently preprocessed).
 
 ### GET (single entry or multiple)
 
-SQL JOINS are not supported.
+SQL JOINS are not supported. Handlers will only feed back simple / raw entities with foreign keys
+"untranslated".
+
+### DELETE
+
+Soft-delete is not supported yet. Multiple entry / batch delete does not exist (and is currently not planned).
 
 ## Generating JSDoc3 Docs
 
