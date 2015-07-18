@@ -4,6 +4,7 @@
 * @todo Make logging to console be optional / supressible.
 * # Developer geared info
 * - Primary key for smodel is available in smodel.primaryKeyAttribute
+* - Sequelize Docs: http://docs.sequelizejs.com/en/latest/
 */
 'use strict';
 // TODO: Change routing URL:s
@@ -28,7 +29,7 @@ function getidfilter (smodel, req) {
    var idf = {where: whereid, limit: 1};
    return idf;
 }
-// Work rawfilter to Sequelize format filter.
+// Internal method to convert rawfilter to Sequelize format filter.
 // TODO: Alow wildcarding, etc.
 function kvfilter (rawfilter) { // (req)
    // TODO: Find k-v pairs in req ?
@@ -69,14 +70,10 @@ function getpersister (otype, res) {
    // 
    if (pers = perscache[otype]) {return pers;}
    // Invalid persister, custom error handling. Ensure request is ended.
-   var emsg = "Not a valid entity type.";
+   var emsg = "Not a valid entity type."; // Keep high level.
    var jerr = {"ok" : 0, "msg": emsg};
    // Override jerr ?
-   if (errcb) {
-     
-     jerr = errcb(otype, emsg);
-     
-   }
+   if (errcb) { jerr = errcb(otype, emsg); }
    // General / default error message generation (Use errcb) to
    // override.
    else {
@@ -195,7 +192,12 @@ function opt_or_ac (req, res) { //
  * Message is also replicated on server console.
  */
 function sendcruderror(basemsg,ex,res) {
-   var jr = {"ok": 0, "msg": basemsg + ": " + ex.message};
+   
+   var jr = {"ok": 0, "msg": basemsg };
+   // TODO: Make ex.message optional If (debug) {...}
+   jr.msg += ": " + ex.message;
+   // Intercept / transform by 
+   //if (errcb) {jr = errcb(..., r.msg);} // TODO
    res.send(jr);
    console.log(jr.msg);
 }
@@ -230,6 +232,7 @@ function crudpost(req, res) { //
   // var f = preproc(smodel); // 'create'
   // if (f) {f( req.body, req, smodel);} // apply ...
   // Traditional try / catch will NOT work here
+  // req.body as array also works.
   smodel.create(req.body)
   // .catch(function (ex) {jr.ok = 0;jr.msg = "Creation problem: "+ex.message;console.log(jr.msg);res.send(jr);})
   .catch(function (ex) {sendcruderror("Creation problem",ex,res);})
@@ -379,11 +382,15 @@ function crudgetsingle (req, res) { //
 // Example route pattern: /^\/(\w+)\/?/
 /** Get multiple (default all) of type by HTTTP GET.
  * Route pattern must have params: ":type"
- * 
+ * The URL may have one or more k-v pairs forming a simple AND filter that is
+ * added to the base query.
  * @example
  * var crudrest = require('crudrest');
  * // ...
  * router.get("/:type", crudrest.crudgetmulti);
+ * // ...
+ * // On client side
+ * $http.get("/products", {params: {vendor: "Cray"}}).success(...)
  */
 function crudgetmulti (req, res)  { // 
   // var otype = req.params[0]; // OLD !
@@ -454,13 +461,14 @@ function defaultrouter(router) {
 //Example: module.exports = router;
 // TODO: MUST Store other things here too.
 // module.exports.perscache = {};
-module.exports.router = router;
+module.exports.router = router; // ????
 /** Set Sequelize ORM/persister config.
  * Persister cache should be pre-indexed as described by documentation main page.
  * @param {object} pc - Indexed ORM map
  */
-module.exports.setperscache = function (pc) {
-  // TODO: Allow array form to be passed. Problem: need 
+// module.exports.setperscache =
+function setperscache (pc) {
+  // TODO: Allow array form to be passed. Problem: need sequelize
   if (Array.isArray(pc)) {
      pc.forEach(function (item) {
        var tn = item[1].tableName;
@@ -468,21 +476,25 @@ module.exports.setperscache = function (pc) {
      });
      return;
   }
+  // Direct pre-indexed format assignment
   perscache = pc;
 }
 /** Set Table / Attribute index for the Options and Autocomplete.
  * This is *only* needed if opt_or_ac is used to 
  */
+function settaidx(pc) {taidx = pc;}
 
+// Helper methods
+module.exports.setperscache = setperscache;
 module.exports.defaultrouter = defaultrouter;
-// Assign: crudpost crudput cruddelete crudgetsingle crudgetmulti
+// Assign Main Handler methods: crudpost crudput cruddelete crudgetsingle crudgetmulti
 module.exports.crudpost = crudpost;
 module.exports.crudput = crudput;
 module.exports.cruddelete = cruddelete;
 module.exports.crudgetsingle = crudgetsingle;
 module.exports.crudgetmulti = crudgetmulti;
-
+// More helpers
 module.exports.opt_or_ac = opt_or_ac;
 module.exports.setrespcb = setrespcb;
 module.exports.seterrhdlr = seterrhdlr;
-module.exports.taidx = function (pc) {taidx = pc;}
+module.exports.settaidx = settaidx;
