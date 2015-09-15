@@ -6,15 +6,21 @@
 * - Primary key for smodel is available in smodel.primaryKeyAttribute
 * - Sequelize Docs: http://docs.sequelizejs.com/en/latest/
 */
-'use strict';
-// TODO: Change routing URL:s
+'use strict;';
+// Note: During dev. install locally: sudo npm install -g
 
 var express = require('express');
 var router = express.Router({caseSensitive: 1});
 var perscache = {};
 var errcb = null;
-var respcb = null;
+var respcb = null; // Custom response callback
 var taidx = {}; // TODO: Move
+// Examples of options
+var cropts = {
+  softdelattr: '', // Universal soft-delete attribute
+  softdeleted: null, // Softdeletion sequelize update (Object, e.g {active: 0})
+  softactive: null // Soft delete active state (not deleted) as sequelize filter (Object, e.g. {where: {active {"ne": 0}}
+};
 /** Internal static method to create ID based filter for Sequelize CRUD Operations.
  * The crudrest module convention requires to have parameter ":idval"
  * in the route URL, which will be used here to resolve id.
@@ -36,7 +42,7 @@ function kvfilter (rawfilter) { // (req)
    // Validate as Object
    
    // Wrap in Sequelize filter format
-   return {where: rawfilter}
+   return {where: rawfilter};
 }
 // OLD: ... HTTP response object and send a desired JSON/REST response indicating the error.
 /** Set custom error / exception handling callback.
@@ -102,7 +108,17 @@ function setrespcb (cb) {
    if (typeof(cb) != "function") {return;}
    respcb = cb;
 }
-
+// Set or get sequelize package options
+function opts(cropts_p) {
+  if (cropts_p) {cropts = cropts_p;}
+  return(cropts);
+}
+function hasattribute (model, attr) {
+   if (typeof model !== 'object') {return 0;}
+   // TODO: Find out if there is high-level Sequelize accessor for this.
+   if (model.tableAttributes[attr]) {return 1;}
+   return 0;
+}
 /** Temporary AC handler.
  * Lookup options source from server side config.
  * To use this, 2 server Server side configurations must be assigned to module variables:
@@ -198,7 +214,7 @@ function sendcruderror(basemsg,ex,res) {
    // Set error with base message.
    var jr = {"ok": 0, "msg": basemsg };
    // TODO: Make ex.message optional If (debug) {...}
-   jr.msg += ": " + ex.message;
+   jr.msg += ": " + ex ? ex.message : "No exceptions";
    // Intercept / transform by 
    //if (errcb) {jr = errcb(..., r.msg);} // TODO
    res.send(jr);
@@ -300,9 +316,10 @@ function crudput (req, res) {
  *
  * @todo Account for softdelete
  * @example
- * var crudrest = require('crudrest');
- * // ...
- * router.delete("/:type/:idval", crudrest.cruddelete);
+ *     var crudrest = require('crudrest');
+ *     // ...
+ *     router.delete("/:type/:idval", crudrest.cruddelete);
+ * 
  */
 function cruddelete (req, res) {
   
@@ -319,28 +336,37 @@ function cruddelete (req, res) {
   //whereid[pka] = idval;
   //var idfilter = {where: whereid, limit: 1};
   var idfilter = getidfilter(smodel, req);
+  // var cropts = opts();
   // Need to check exists first ?
   // Need a flag for exception ?
-  smodel.destroy(idfilter)
-  // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
-  .catch(function (ex) {sendcruderror("Failed to Delete",ex,res);})
-  .then(function (num) {
-    jr.ok = num;
-    jr.idval = idval;
-    if (!num) {jr.msg = "No such entry: " + idval;}
-    console.log("Deleted (count): " + num);
-    // if (!num) {return;} // Earlier exception
-    var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
-    res.send(d);
-  });
-  // Soft delete (need attr and value)
-  // if (conf.softdel && smodel.hasAttr(sdattr)) {
-  //   smodel.update(softdel, idfilter)
-  //   .catch(function (ex) {sendcruderror("Failed to SoftDelete",ex,res);})
-  //   .then(function (num) {
-  //      
-  //   });
-  // }
+  // Soft delete => UPDATE (need attr and value)
+  if (cropts.softdelattr && hasattribute(smodel, cropts.softdelattr)) { // smodel.hasAttr(sdattr)
+    var softdel = cropts.softdeleted;
+    if (typeof softdel !== 'object') {sendcruderror("Soft delete no properly configured", null, res);}
+    console.log("Soft-delete mode: Use update setter", softdel);
+    smodel.update(softdel, idfilter)
+    .catch(function (ex) {sendcruderror("Failed to SoftDelete", ex, res);})
+    .then(function (num) {
+       console.log("Sofdel (update) ret: ", num);
+       var d = respcb ? respcb(jr, "delete") : jr;
+       res.send(d);
+    });
+  }
+  // Real DELETE
+  else {
+    smodel.destroy(idfilter)
+    // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+    .catch(function (ex) {sendcruderror("Failed to Delete",ex,res);})
+    .then(function (num) {
+      jr.ok = num;
+      jr.idval = idval;
+      if (!num) {jr.msg = "No such entry: " + idval;}
+      console.log("Deleted (count): " + num);
+      // if (!num) {return;} // Earlier exception
+      var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
+      res.send(d);
+    });
+  }
 }
 
 // 2 cases for GET
@@ -392,8 +418,8 @@ function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
   var otype = req.params['type'];
   var smodel = getpersister(otype, res);
-  if (!smodel) {return;}
-  var filter = {};
+  if (!smodel) {sendcruderror("No Model Found for "+otype, ex, res);return;}
+  var filter = {}; // Add where: {} ?
   // If parameters, add to filter here.
   // TODO: Check type of Object
   if (req.query && Object.keys(req.query).length) {
@@ -405,7 +431,20 @@ function crudgetmulti (req, res)  {
     filter = kvfilter(filter);
     console.log("Assembled filter (Seq): " + JSON.stringify(filter));
   }
-  else {console.log("DO NOT Have query filter (no keys found)");}
+  else {console.log("Do NOT Have query filter (no keys found)");}
+  // Check softdel filter
+  // Soft del attribute explicitly in filter - honor the value give (make exclusive to)
+  //if (filter.where && filter.where[cropts.softdelattr]) {}
+  // else ... Automatic softdel (optim. hasattribute() to be last)
+  //if (cropts.softdelattr &&  cropts.softactive && hasattribute(smodel, cropts.softdelattr) ) {
+  //  if (!filter.where) { filter.where = {}; }
+  //  var sa = cropts.softactive;
+  //  if (typeof sa !== 'object') { sendcruderror("Soft Activity not configured", ex, res); return;}
+  //  // Add to (previous) filter. How to overlay 2 independent filters in a bulletproof manner ?
+  //  var dks = Object.keys(sa.where); // e.g. {where: {active: {"ne": 0}}
+  //  dks.forEach(function (k) { filter.where[k] = sa.where[k]; });
+  //  console.log("Final Sequelize soft-active query filter: ", filter);
+  //}
   smodel.findAll(filter)
   // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
   .catch(function (ex) {sendcruderror("No Entries Found",ex,res);})
@@ -495,3 +534,5 @@ module.exports.opt_or_ac = opt_or_ac;
 module.exports.setrespcb = setrespcb;
 module.exports.seterrhdlr = seterrhdlr;
 module.exports.settaidx = settaidx;
+module.exports.opts = opts;
+
