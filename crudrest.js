@@ -113,11 +113,14 @@ function setrespcb (cb) {
  *     // Do GET on http://myapp/ac/?ta=projects.projectid
  *     wget -O opts.json http://myapp/ac/?ta=projects.projectid
  */
-function opt_or_ac (req, res) { // 
+function opt_or_ac (req, res) {
    "use strict";
    var ta = req.query["ta"]; // OR: req.params["ta"]
+   // Support alternative server URL route embedding of ta notation
+   if (!ta && req.params['ta']) {ta = req.params['ta'];}
    console.log("opt_or_ac");
    var term = req.query["term"];
+   // OLD: ... 
    if (!ta) {throw "No ta parameter";}
    // ta.match(/^\w+\.\w+/) // OR search ?
    if (ta.indexOf('.') < 1) {throw "ta in wrong format";} // Later regexp
@@ -192,7 +195,7 @@ function opt_or_ac (req, res) { //
  * Message is also replicated on server console.
  */
 function sendcruderror(basemsg,ex,res) {
-   
+   // Set error with base message.
    var jr = {"ok": 0, "msg": basemsg };
    // TODO: Make ex.message optional If (debug) {...}
    jr.msg += ": " + ex.message;
@@ -203,9 +206,6 @@ function sendcruderror(basemsg,ex,res) {
 }
 /************************** CRUD ***************************/
 
-// Assign handler(s) for REST URL
-// How do we automatically get parsed JSON here ? "/people/"
-// Recommended route pattern: /^\/(\w+)\/?/ (e.g. "/people/")
 /** Insert/Create a single entry of type by HTTP POST.
  * Route pattern must have params: ":type"
  * 
@@ -216,9 +216,9 @@ function sendcruderror(basemsg,ex,res) {
  */
 // Note: ER_BAD_FIELD_ERROR: Unknown column 'id' in 'field list'
 // ... Table does not have primary key
-function crudpost(req, res) { // 
+function crudpost(req, res) {
   res.setHeader('Content-Type', 'text/json');
-  console.log("Posted JSON: " + JSON.stringify(req.body, null, 2));
+  console.log("POSTed JSON: " + JSON.stringify(req.body, null, 2));
   // console.log("User is-a: " + User); //  [object SequelizeModel]
   var otype = req.params['type'];
   console.log("POST: OType: " + otype);
@@ -245,8 +245,6 @@ function crudpost(req, res) { //
   });
 }
 
-
-// Recommended route pattern: /^\/(\w+)\/(\d+)/ (e.g. "/people/3")
 // http://stackoverflow.com/questions/8158244/how-to-update-a-record-using-sequelize-for-node
 /** Update single entry of a type by id by HTTP PUT.
  * Route pattern must have params: ":type", ":idval"
@@ -256,7 +254,7 @@ function crudpost(req, res) { //
  * // ...
  * router.put("/:type/:idval", crudrest.crudput);
  */
-function crudput (req, res) { // 
+function crudput (req, res) {
   
   var jr = {'ok': 1};
   var otype = req.params['type'];
@@ -297,8 +295,6 @@ function crudput (req, res) { //
   }); // end of find/then
 }
 
-
-//  Recommended route pattern: /^\/(\w+)\/(\d+)/ (e.g "/people/3")
 /** Delete single entry of a type by id by HTTP DELETE.
  * Route pattern must have params: ":type", ":idval"
  *
@@ -308,7 +304,7 @@ function crudput (req, res) { //
  * // ...
  * router.delete("/:type/:idval", crudrest.cruddelete);
  */
-function cruddelete (req, res) { // 
+function cruddelete (req, res) {
   
   var jr = {'ok': 1};
   var otype = req.params['type'];
@@ -350,7 +346,7 @@ function cruddelete (req, res) { //
 // 2 cases for GET
 // Recommended route pattern: /^\/(\w+)\/(\d+)/
 
-/** Fetch/Retrieve single entry by type and id by HTTTP GET.
+/** Fetch/Retrieve single entry by type and id using HTTP GET method.
  * Route pattern must have params: ":type", ":idval"
  * 
  * @example
@@ -358,7 +354,7 @@ function cruddelete (req, res) { //
  * // ...
  * router.get("/:type/:idval", crudrest.crudgetsingle);
  */
-function crudgetsingle (req, res) { // 
+function crudgetsingle (req, res) {
   var jr = {'ok': 1};
   var otype = req.params['type'];
   // OLD: var idval = req.params[1];
@@ -379,11 +375,11 @@ function crudgetsingle (req, res) { //
   });
 }
 
-// Example route pattern: /^\/(\w+)\/?/
-/** Get multiple (default all) of type by HTTTP GET.
+/** Get multiple (default all) of type using HTTP GET method.
  * Route pattern must have params: ":type"
- * The URL may have one or more k-v pairs forming a simple AND filter that is
+ * The URL may have one or more k-v pairs (in req.query) forming a simple AND filter that is
  * added to the base query.
+ * Passing multiple values by same key is converted to as WHERE key IN (v1,v2...) by Sequelize.
  * @example
  * var crudrest = require('crudrest');
  * // ...
@@ -392,7 +388,7 @@ function crudgetsingle (req, res) { //
  * // On client side
  * $http.get("/products", {params: {vendor: "Cray"}}).success(...)
  */
-function crudgetmulti (req, res)  { // 
+function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
   var otype = req.params['type'];
   var smodel = getpersister(otype, res);
@@ -402,7 +398,8 @@ function crudgetmulti (req, res)  { //
   // TODO: Check type of Object
   if (req.query && Object.keys(req.query).length) {
     var keys = Object.keys(req.query);
-    console.log("Have query: " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
+    console.log("Have query params: " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
+    // Note: Treat Array val specially (or let the normal thing happen ?)
     keys.forEach(function (k) {filter[k] = req.query[k];});
     // Wrap in Sequelize compatible (format is more complex than meets the eye)
     filter = kvfilter(filter);
