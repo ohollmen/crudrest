@@ -87,7 +87,7 @@ function getpersister (otype, res) {
      // jerr.msg += "Type:" + otype + ". Total types:" + Object.keys(perscache).length;
      
    }
-   res.send(jerr);
+   res.send(jerr); // TODO: NOT Here ? See/Analyze error handling above
    console.log("Invalid entity type requested: " + otype);
    return null;
 }
@@ -128,6 +128,9 @@ function hasattribute (model, attr) {
  * @example
  *     // Do GET on http://myapp/ac/?ta=projects.projectid
  *     wget -O opts.json http://myapp/ac/?ta=projects.projectid
+ *
+ * Table and attribute parameter is allowed to be gotten from URL k-v parameter "ta" (e.g. &ta=product.vendor) or
+ * route patameter route parameter (:ta) by same name "ta" (/ac/project.vendor?...).
  */
 function opt_or_ac (req, res) {
    "use strict";
@@ -139,7 +142,8 @@ function opt_or_ac (req, res) {
    // OLD: ... 
    if (!ta) {throw "No ta parameter";}
    // ta.match(/^\w+\.\w+/) // OR search ?
-   if (ta.indexOf('.') < 1) {throw "ta in wrong format";} // Later regexp
+   if (ta.indexOf('.') < 1) {throw "ta in wrong format (missing dot)";} // Later regexp
+   if (!taidx || typeof taidx !== 'object') {throw "No taidx available";}
    var optinfo = taidx[ta];
    if (!optinfo) {throw "No ta entry for " + ta + " in " + taidx + "(Use taidx() )";} // TODO: Array
    // Support static / constant options (rawlist, keyvallist)
@@ -233,7 +237,7 @@ function sendcruderror(basemsg,ex,res) {
 // Note: ER_BAD_FIELD_ERROR: Unknown column 'id' in 'field list'
 // ... Table does not have primary key
 function crudpost(req, res) {
-  res.setHeader('Content-Type', 'text/json');
+  // res.setHeader('Content-Type', 'text/json'); /// Let app middleware handle this collectively.
   console.log("POSTed JSON: " + JSON.stringify(req.body, null, 2));
   // console.log("User is-a: " + User); //  [object SequelizeModel]
   var otype = req.params['type'];
@@ -423,6 +427,8 @@ function crudgetmulti (req, res)  {
   // If parameters, add to filter here.
   // TODO: Check type of Object
   if (req.query && Object.keys(req.query).length) {
+    // Plan to call probe_sort() to figure out "order" for Sequelize
+    // probe_sort(req, filter); // No ret value, modifies filter and req.query
     var keys = Object.keys(req.query);
     console.log("Have query params: " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
     // Note: Treat Array val specially (or let the normal thing happen ?)
@@ -433,8 +439,8 @@ function crudgetmulti (req, res)  {
   }
   else {console.log("Do NOT Have query filter (no keys found)");}
   // Check softdel filter
-  // Soft del attribute explicitly in filter - honor the value give (make exclusive to)
-  //if (filter.where && filter.where[cropts.softdelattr]) {}
+  // Soft del attribute explicitly already in filter - honor the value given (make exclusive to auto-softdetele-filter)
+  //if (cropts.softdelattr && filter.where && filter.where[cropts.softdelattr]) {}
   // else ... Automatic softdel (optim. hasattribute() to be last)
   //if (cropts.softdelattr &&  cropts.softactive && hasattribute(smodel, cropts.softdelattr) ) {
   //  if (!filter.where) { filter.where = {}; }
@@ -455,7 +461,46 @@ function crudgetmulti (req, res)  {
     res.send(d);
   });
 }
-
+/** Add Sort/Order components from request parameters to Sequelize filter (if any).
+ * Has a side effect of removing all Sort/Order query parameters from request (req) to not
+ * treat them as where filter components later.
+ * Sort/Order components are picked up from query parameter "_sort" with following options
+ * - value should be attr name with optional direction parameter separated by comma
+ * - If direction parameter is missing, 'ASC' is used
+ * - One or more Sort/Order components can be passed
+ * Adds Sequelize "order" parameter to 
+ */
+function probe_sort(req, filter) {
+  var qp = req.query;
+  
+  if (!qp) {return;} // No query !
+  if (!qp['_sort']) {return;} // No sort parameter
+  
+  var defdir = 'ASC';
+  var validdir = {ASC: true, DESC: true}; // Valid sort directions (as upper case)
+  // Coerce to array
+  if (!Array.isArray(qp['_sort'])) {qp['_sort'] = [qp['_sort']];}
+  var sarr = qp['_sort'];
+  var order = sarr.map(function (sortp) {
+    // Split to attribute, sort_direction
+    var sortpair = sortp.split(/,/);
+    if (!sortpair) {console.log("No sortpair !");return null;}
+    if (!sortpair.length || sortpair.length > 2) {console.log("No length for sortpair or too many attr params (should be 1 or 2) !");return null;}
+    // TODO: To be _really_ clean, check attr presence.
+    // Add (defaylt) sort direction if needed
+    if (sortpair.length === 1) {sortpair.push(defdir);}
+    // Conver to upper and validate
+    else {
+      sortpair[1] = sortpair[1].toUpper();
+      if (!validdir[ sortpair[1] ]) {console.log("Invalid direction param "+sortpair[1]+" !");return null;}
+    }
+    return sortpair;
+  });
+  // Add Sequelize "order" param to filter to use in later query.
+  filter.order = order.filter(function (it) {return it;}); // Strip null:s
+  // Get rid of '_sort'
+  delete(qp['_sort']);
+}
 /** Setup a good default router with default router URL:s.
  * Mainly used for the example app bundled in to module distribution.
  * For more granular routing setup do a similar reouter calls directly in your own app.
@@ -465,20 +510,14 @@ function crudgetmulti (req, res)  {
  *     var router = express.Router({caseSensitive: 1});
  *     crudrest.defaultrouter(router);
  *     // ...
- *     // Directly under root
+ *     // Directly under root (unlikely)
  *     app.use('/', router);
  *     // ... or under special path
  *     // app.use('/specialpath', router);
  */
 function defaultrouter(router) {
-   if (!router) {  router = express.Router({caseSensitive: 1}); }
+   if ( ! router) {  router = express.Router({caseSensitive: 1}); }
    // function dummy (req, res) {}
-   // OLD Regexp routes
-   //router.post(/^\/(\w+)\/?/, crudpost); // POST 1 arg: ot
-   //router.put(/^\/(\w+)\/(\d+)/, crudput); // PUT 2 args: ot,id
-   //router.delete(/^\/(\w+)\/(\d+)/, cruddelete); // DELETE 2 args: ot,id
-   //router.get(/^\/(\w+)\/(\d+)/, crudgetsingle); // GET (single) 2 args: ot,id
-   //router.get(/^\/(\w+)\/?/, crudgetmulti); // GET(multiple) 1 arg: ot
    
    // Options or AC (Based on this pattern must be early)
    // TODO: Have this SEPARATELY "connectable"
@@ -490,7 +529,7 @@ function defaultrouter(router) {
    router.get   ("/:type/:idval", crudgetsingle); // GET (single) 2 args: type,id
    router.get   ("/:type", crudgetmulti); // GET(multiple) 1 arg: type
    
-   console.log("Set up router: " + router);
+   console.log("Set up router: ", router);
    return router;
 }
 
@@ -502,7 +541,6 @@ module.exports.router = router; // ????
  * Persister cache should be pre-indexed as described by documentation main page.
  * @param {object} pc - Indexed ORM map
  */
-// module.exports.setperscache =
 function setperscache (pc) {
   // TODO: Allow array form to be passed. Problem: need sequelize
   if (Array.isArray(pc)) {
