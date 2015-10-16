@@ -47,11 +47,12 @@ Sequelize configs for the whole app must be stored in a config file with followi
 This can be then mapped into an index by entity types (see "tableName" below) that crudrest can use as-is:
 
      var seqcfg = require("./myapp.sequelize.conf.js");
+     var perscache = {};
      seqcfg.forEach(function (item) {
        var tn = item[1].tableName;
        perscache[tn] = sequelize.define(tn, item[0], item[1]);
      });
-     // Let crudrest know about your config
+     // Let crudrest know about your ORM Model config
      crudrest.setperscache(perscache);
 
 ## Associating Server URL routes to crudrest handlers
@@ -60,7 +61,7 @@ Example above (on top) showed a way to associate URL:s in a default way
 
     var router = express.Router({caseSensitive: 1});
     crudrest.defaultrouter(router);
-    app.use('/ents', crudrest);
+    app.use('/ents', router);
 
 To gain more control and actually "see" the associations you can do router assignments individually
 (loading and initialization of crudrest and instantiation of Express router are left out):
@@ -80,7 +81,7 @@ If you are bit on the hard-core side you'll probably want to do something like a
 The rest response format is (even) much less "standardized" or "de-facto" than request.
 Crudrest allows one to customize the response for success and error cases with an intercepting callbacks
 (applicable to all CRUD methods).
-The REST error / exception response is customizable by setting the exception callback via:
+The REST error / exception response and success response are customizable by setting the callbacks via methods seterrhdlr() and setrespcb() respectively:
 
     // Set error / exception handler
     crudrest.seterrhdlr(function (typename, errmsg) {
@@ -101,7 +102,7 @@ the request:
        jerr = {"ok": 0, "msg":"Bad activity intercepted"};
        if (!validtype(req.params['type'])) {jerr.msg += ". Weird entity type requested !";req.json(jerr);return;}
        if (!valididformat(req.params['idval'])) {jerr.msg += ". Faulty ID format";req.json(jerr);return;}
-       crudrest.crudgetsingle(req, res); // .. Only then call
+       crudrest.crudgetsingle(req, res); // .. Only then call "raw" handler
     });
 
 Now handler crudrest.crudgetsingle is indirectly assigned to URL route.
