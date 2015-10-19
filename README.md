@@ -76,9 +76,20 @@ To gain more control and actually "see" the associations you can do router assig
 If you are bit on the hard-core side you'll probably want to do something like above
 (its still relatively terse).
 
+## CRUD Handler Documentation
+
+See embedded JSDoc documentation for details (See: "Generating JSDoc3 Docs" at the end of this doc).
+
 ## Customizing REST Responses
 
 The rest response format is (even) much less "standardized" or "de-facto" than request.
+By default crudrest goes with the simpliest route of having the
+response/ result data immediately on the top level of JSON. For single
+entry response the top level of JSON would be (result entry) Object
+and for multientry response an Array of Objects (AoO). This is often
+"too simple" as client might like to know if response was successful
+and possibly a message for the reason of failure.
+
 Crudrest allows one to customize the response for success and error cases with an intercepting callbacks
 (applicable to all CRUD methods).
 The REST error / exception response and success response are customizable by setting the callbacks via methods seterrhdlr() and setrespcb() respectively:
@@ -94,7 +105,7 @@ The REST error / exception response and success response are customizable by set
 
 ## Intercepting CRUD requests
 
-Instead of assigning handlers directly URL routes, you can allow yourself to intercept
+Instead of assigning handlers directly URL routes, you can allow your app to intercept
 the request:
 
     router.get("/crud/:type/:idval", function (req, res) {

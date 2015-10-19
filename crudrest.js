@@ -410,13 +410,20 @@ function crudgetsingle (req, res) {
  * The URL may have one or more k-v pairs (in req.query) forming a simple AND filter that is
  * added to the base query.
  * Passing multiple values by same key is converted to as WHERE key IN (v1,v2...) by Sequelize.
- * @example
- * var crudrest = require('crudrest');
- * // ...
- * router.get("/:type", crudrest.crudgetmulti);
- * // ...
- * // On client side
- * $http.get("/products", {params: {vendor: "Cray"}}).success(...)
+ *
+ *     var crudrest = require('crudrest');
+ *     // ...
+ *     router.get("/:type", crudrest.crudgetmulti);
+ *     // ...
+ *     // On client side (pass search filter for vendor)
+ *     $http.get("/products", {params: {vendor: "Cray"}}).success(...)
+ *
+ * Sorting the results - use reserved parameter "_sort"
+ *     // Single sort criteria
+ *     $http.get("/products", {params: {vendor: "Cray", _sort: "model,ASC"}}).success(...)
+ *     // Multiple sort properties (sort direction specifier ASC/DESC is optional)
+ *     $http.get("/products", {params: {vendor: "Cray", _sort: ["model,ASC", "mfgdate"]}}).success(...)
+ *
  */
 function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
@@ -427,8 +434,9 @@ function crudgetmulti (req, res)  {
   // If parameters, add to filter here.
   // TODO: Check type of Object
   if (req.query && Object.keys(req.query).length) {
-    // Plan to call probe_sort() to figure out "order" for Sequelize
-    // probe_sort(req, filter); // No ret value, modifies filter and req.query
+    // Call probe_sort() to figure out "order" for Sequelize (param key '_sort')
+    // Having no '_sort' param changes nothing.
+    probe_sort(req, filter); // No ret value, modifies filter and req.query
     var keys = Object.keys(req.query);
     console.log("Have query params: " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
     // Note: Treat Array val specially (or let the normal thing happen ?)
@@ -468,7 +476,7 @@ function crudgetmulti (req, res)  {
  * - value should be attr name with optional direction parameter separated by comma
  * - If direction parameter is missing, 'ASC' is used
  * - One or more Sort/Order components can be passed
- * Adds Sequelize "order" parameter to 
+ * Adds Sequelize "order" parameter to where filter definition passed here
  */
 function probe_sort(req, filter) {
   var qp = req.query;
