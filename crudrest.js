@@ -436,13 +436,14 @@ function crudgetmulti (req, res)  {
   if (req.query && Object.keys(req.query).length) {
     // Call probe_sort() to figure out "order" for Sequelize (param key '_sort')
     // Having no '_sort' param changes nothing.
-    probe_sort(req, filter); // No ret value, modifies filter and req.query
+    var order = probe_sort(req, filter); // No ret value, modifies filter and req.query
     var keys = Object.keys(req.query);
     console.log("Have query params: " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
     // Note: Treat Array val specially (or let the normal thing happen ?)
     keys.forEach(function (k) {filter[k] = req.query[k];});
     // Wrap in Sequelize compatible (format is more complex than meets the eye)
     filter = kvfilter(filter);
+    filter.order = order;
     console.log("Assembled filter (Seq): " + JSON.stringify(filter));
   }
   else {console.log("Do NOT Have query filter (no keys found)");}
@@ -476,7 +477,7 @@ function crudgetmulti (req, res)  {
  * - value should be attr name with optional direction parameter separated by comma
  * - If direction parameter is missing, 'ASC' is used
  * - One or more Sort/Order components can be passed
- * Adds Sequelize "order" parameter to where filter definition passed here
+ * Returns Sequelize "order" parameter to where filter definition passed here
  */
 function probe_sort(req, filter) {
   var qp = req.query;
@@ -505,9 +506,11 @@ function probe_sort(req, filter) {
     return sortpair;
   });
   // Add Sequelize "order" param to filter to use in later query.
-  filter.order = order.filter(function (it) {return it;}); // Strip null:s
+  // OLD: filter.order = order.filter(function (it) {return it;}); // Strip null:s
+  var order = order.filter(function (it) {return it;});
   // Get rid of '_sort'
   delete(qp['_sort']);
+  return order;
 }
 /** Setup a good default router with default router URL:s.
  * Mainly used for the example app bundled in to module distribution.
