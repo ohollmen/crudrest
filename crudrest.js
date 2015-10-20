@@ -218,7 +218,7 @@ function sendcruderror(basemsg,ex,res) {
    // Set error with base message.
    var jr = {"ok": 0, "msg": basemsg };
    // TODO: Make ex.message optional If (debug) {...}
-   jr.msg += ": " + ex ? ex.message : "No exceptions";
+   jr.msg += ": " + ex ? ex.message : "(No exceptions)";
    // Intercept / transform by 
    //if (errcb) {jr = errcb(..., r.msg);} // TODO
    res.send(jr);
@@ -429,7 +429,7 @@ function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
   var otype = req.params['type'];
   var smodel = getpersister(otype, res);
-  if (!smodel) {sendcruderror("No Model Found for "+otype, ex, res);return;}
+  if (!smodel) {sendcruderror("No Model Found for "+ otype, null, res);return;}
   var filter = {}; // Add where: {} ?
   // If parameters, add to filter here.
   // TODO: Check type of Object
@@ -443,18 +443,18 @@ function crudgetmulti (req, res)  {
     keys.forEach(function (k) {filter[k] = req.query[k];});
     // Wrap in Sequelize compatible (format is more complex than meets the eye)
     filter = kvfilter(filter);
-    filter.order = order;
+    if (order) { filter.order = order; }
     console.log("Assembled filter (Seq): " + JSON.stringify(filter));
   }
   else {console.log("Do NOT Have query filter (no keys found)");}
   // Check softdel filter
   // Soft del attribute explicitly already in filter - honor the value given (make exclusive to auto-softdetele-filter)
-  //if (cropts.softdelattr && filter.where && filter.where[cropts.softdelattr]) {}
+  //if (cropts.softdelattr && filter.where && filter.where[cropts.softdelattr]) {} // return ...
   // else ... Automatic softdel (optim. hasattribute() to be last)
   //if (cropts.softdelattr &&  cropts.softactive && hasattribute(smodel, cropts.softdelattr) ) {
   //  if (!filter.where) { filter.where = {}; }
   //  var sa = cropts.softactive;
-  //  if (typeof sa !== 'object') { sendcruderror("Soft Activity not configured", ex, res); return;}
+  //  if (typeof sa !== 'object') { sendcruderror("Soft Activity not configured (as Object)", null, res); return;}
   //  // Add to (previous) filter. How to overlay 2 independent filters in a bulletproof manner ?
   //  var dks = Object.keys(sa.where); // e.g. {where: {active: {"ne": 0}}
   //  dks.forEach(function (k) { filter.where[k] = sa.where[k]; });
