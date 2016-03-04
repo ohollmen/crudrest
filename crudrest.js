@@ -68,6 +68,8 @@ function seterrhdlr(f) {
  @todo Consider doing more here: access control ?
  @param {string} otype - Name for Object/Entity type
  @param {object} res - Response
+ @return null for no entity type found. REST Error has been already sent and
+ caller should just return without further actions.
 */
 function getpersister (otype, res) {
    var pers;
@@ -177,7 +179,8 @@ function opt_or_ac (req, res) {
    // });
    // Sequelize. TODO: Refine filter
    var smodel = getpersister(optinfo[1], res); // otype
-   if (!smodel) {throw "No Model for " + optinfo[1];}
+   // Do not error twice: throw "No Model for " + optinfo[1];
+   if (!smodel) {return;}
    var filter = {};
    if (term) { filter.where = [optinfo[3]+' LIKE ?', term + '%'];console.log("Got term:" + term);}
    console.log("Using filter: " + JSON.stringify(filter));
@@ -245,7 +248,8 @@ function crudpost(req, res) {
   var jr = {'ok': 1};
   // Lookup persister
   var smodel = getpersister(otype, res); //  [object SequelizeModel]
-  if (!smodel) {jr.ok = 0;jr.msg = "No Model";res.send(jr);return;}
+  // Not twice: jr.ok = 0;jr.msg = "No Model";res.send(jr);
+  if (!smodel) {return;}
   //console.log("Dump: " + JSON.stringify(req.body));jr.id = 6666666;jr.msg = "Things ok in debug mode";
   //res.send(JSON.stringify(jr));return; // DEBUG
   // Intercept with a callback (validate, add timestamps, check access permissions ...)
@@ -340,6 +344,8 @@ function cruddelete (req, res) {
   //whereid[pka] = idval;
   //var idfilter = {where: whereid, limit: 1};
   var idfilter = getidfilter(smodel, req);
+  var byfilter = null; // Delete by attribute ...
+  
   // var cropts = opts();
   // Need to check exists first ?
   // Need a flag for exception ?
@@ -429,7 +435,9 @@ function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
   var otype = req.params['type'];
   var smodel = getpersister(otype, res);
-  if (!smodel) {sendcruderror("No Model Found for "+ otype, null, res);return;}
+  // Note: getpersister already sends error, do not send twice: 
+  // sendcruderror("No Model Found for "+ otype, null, res);
+  if (!smodel) {return;}
   var filter = {}; // Add where: {} ?
   // If parameters, add to filter here.
   // TODO: Check type of Object
