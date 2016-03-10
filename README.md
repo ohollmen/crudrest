@@ -148,7 +148,7 @@ Soft-delete is not supported yet. Multiple entry / batch delete does not exist (
 
 In the project top directory run jsdoc:
 
-    jsdoc crudrest.server.js crudrest.js -R README.md -c conf.json
+    jsdoc crudrest.server.js crudrest.js -R README.md -c jsdoc.conf.json
 
 More on JSDoc: http://usejsdoc.org/
 
