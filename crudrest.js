@@ -1,7 +1,9 @@
+/** @module */
 
 /* @file
 * All JSDoc "Home" content moved to README.md
 * @todo Make logging to console be optional / supressible.
+*
 * # Developer geared info
 * - Primary key for smodel is available in smodel.primaryKeyAttribute
 * - Sequelize Docs: http://docs.sequelizejs.com/en/latest/
@@ -10,6 +12,7 @@
 // Note: During dev. install locally: sudo npm install -g
 
 var express = require('express');
+var async   = require('async'); // For mixed C,U,D processing.
 var router = express.Router({caseSensitive: 1});
 var perscache = {};
 var errcb = null;
@@ -19,13 +22,16 @@ var taidx = {}; // TODO: Move
 var cropts = {
   softdelattr: '', // Universal soft-delete attribute
   softdeleted: null, // Softdeletion sequelize update (Object, e.g {active: 0})
-  softactive: null // Soft delete active state (not deleted) as sequelize filter (Object, e.g. {where: {active {"ne": 0}}
+  softactive: null, // Soft delete active state (not deleted) as sequelize filter (Object, e.g. {where: {active {"ne": 0}}
+  mixeddelprop: null, // "isDeleted" property for mixed C,U,D processing, denoting deletion
+  debug: 0 // TODO: Start using debug flag across the module
 };
 /** Internal static method to create ID based filter for Sequelize CRUD Operations.
  * The crudrest module convention requires to have parameter ":idval"
  * in the route URL, which will be used here to resolve id.
- * @param {object} smodel - Sequelize model
- * @param {object} req - Node.js / Express HTTP request
+ * @param {object} smodel - Sequelize model (for a entity type)
+ * @param {object} req - Node.js / Express HTTP request (from whose params the ID filter will be extracted).
+ * 
  */
 function getidfilter (smodel, req) {
    var idval = req.params['idval'];
@@ -35,8 +41,10 @@ function getidfilter (smodel, req) {
    var idf = {where: whereid, limit: 1};
    return idf;
 }
-// Internal method to convert rawfilter to Sequelize format filter.
-// TODO: Alow wildcarding, etc.
+/* Internal method to convert rawfilter to Sequelize format filter.
+ * This only adds a "where" object layer to raw filter passed in.
+ * @todo Allow wildcarding, etc.
+ */
 function kvfilter (rawfilter) { // (req)
    // TODO: Find k-v pairs in req ?
    // Validate as Object
@@ -48,11 +56,13 @@ function kvfilter (rawfilter) { // (req)
 /** Set custom error / exception handling callback.
 * The callback should accept parameters object type name and error message and create the
 * (error) message structure sent back to client as JSON.
+*
+* Example of setting handler:
+*
+*     crudrest.seterrhdlr(function (typename, errmsg) {
+*       return {"status": "err", "msg": errmsg + ". Type: " + typename};
+*     });
 * @param {function} f - Error callback function
-* @example
-* crudrest.seterrhdlr(function (typename, errmsg) {
-*   return {"status": "err", "msg": errmsg + ". Type: " + typename};
-* });
 */
 function seterrhdlr(f) {
    // Check that we fed a function
@@ -60,16 +70,21 @@ function seterrhdlr(f) {
    errcb = f;
 }
 /** Internal static method to get Persister by entity type name.
- For a requests for invalid entity types send an REST Error.
+ For a requests for invalid entity types send an REST Error automatically.
  If module variable errcb is set to a callback handler, this callback is used to formulate
  the error to res (Node.js HTTP response).
  If this returns false value (no persister), the calling Node handler should plainly return
  to end the response as all the response communication has already been done here.
- @todo Consider doing more here: access control ?
+ 
+      var model = getpersister("accesslog", res);
+      if (!model) { return; } // Just return, error response is already sent.
+ 
  @param {string} otype - Name for Object/Entity type
  @param {object} res - Response
  @return null for no entity type found. REST Error has been already sent and
  caller should just return without further actions.
+ 
+ @todo Consider doing more here: access control ?
 */
 function getpersister (otype, res) {
    var pers;
@@ -97,20 +112,20 @@ function getpersister (otype, res) {
 * Custom here means that instead of the "raw" object the handler could return the data "wrapped"
 * with one extra JSON (Object) layer (the choice of layering is yours).
 * Whatever callback returns is serialized (as JSON) to client.
-* @example
+*
 *     // Transform the JSON structure slightly. Add "status" layer.
 *     crudrest.setrespcb(function (origdata, op) {
 *       return {"status": "ok", "data": origdata};
 *     });
 * 
-* The 2nd parameter "op" is one of: 'create','update','retrieve','delete'.
+* The 2nd parameter "op" is one of: 'create','update','retrieve','delete' ('mixed').
 */
 function setrespcb (cb) {
    // Must be function
    if (typeof(cb) != "function") {return;}
    respcb = cb;
 }
-// Set or get sequelize package options
+// Set or get crudrest package options
 function opts(cropts_p) {
   if (cropts_p) {cropts = cropts_p;}
   return(cropts);
@@ -127,22 +142,24 @@ function hasattribute (model, attr) {
  * - Options / AC config - use accessor taidx() to set config.
  * - Sequelize model index - use accessor setperscache() for this.
  * (See other parts of doc for this module)
- * @example
- *     // Do GET on http://myapp/ac/?ta=projects.projectid
- *     wget -O opts.json http://myapp/ac/?ta=projects.projectid
+ * 
+ * Example usage (for testing):
+ * 
+ *       // Do GET on http://myapp/ac/?ta=projects.projectid
+ *       wget -O opts.json http://myapp/ac/?ta=projects.projectid
  *
  * Table and attribute parameter is allowed to be gotten from URL k-v parameter "ta" (e.g. &ta=product.vendor) or
- * route patameter route parameter (:ta) by same name "ta" (/ac/project.vendor?...).
+ * route parameter route parameter (:ta) by same name "ta" (/ac/project.vendor?...).
  */
 function opt_or_ac (req, res) {
    "use strict";
-   var ta = req.query["ta"]; // OR: req.params["ta"]
+   var ta = req.query["ta"]; // OR: req.params["ta"] (Allowed below)
    // Support alternative server URL route embedding of ta notation
    if (!ta && req.params['ta']) {ta = req.params['ta'];}
    console.log("opt_or_ac");
    var term = req.query["term"];
    // OLD: ... 
-   if (!ta) {throw "No ta parameter";}
+   if (!ta) { sendcruderror("No ta parameter", null, res); return; } //  // throw "No ta parameter";
    // ta.match(/^\w+\.\w+/) // OR search ?
    if (ta.indexOf('.') < 1) {throw "ta in wrong format (missing dot)";} // Later regexp
    if (!taidx || typeof taidx !== 'object') {throw "No taidx available";}
@@ -216,8 +233,16 @@ function opt_or_ac (req, res) {
 }
 /** Internal method to send exception based Sequelize error messages to client.
  * Message is also replicated on server console.
+
+ * Note: Do not send another response body after calling this as this also ends / terminates the response output (!).
+ *    
+ *     if (err) { sendcruderror("Failed to update ...:"+err,ex,res); return; }
+ *
+ * @param {string} basemsg - Human readable error message
+ * @param {object} ex - Exception object
+ * @param {object} res - Response Object to send error to.
  */
-function sendcruderror(basemsg,ex,res) {
+function sendcruderror(basemsg, ex, res) {
    // Set error with base message.
    var jr = {"ok": 0, "msg": basemsg };
    // TODO: Make ex.message optional If (debug) {...}
@@ -232,10 +257,10 @@ function sendcruderror(basemsg,ex,res) {
 /** Insert/Create a single entry of type by HTTP POST.
  * Route pattern must have params: ":type"
  * 
- * @example
- * var crudrest = require('crudrest');
- * // ...
- * router.post("/:type/", crudrest.crudpost);
+ * 
+ *     var crudrest = require('crudrest');
+ *     // ...
+ *     router.post("/:type/", crudrest.crudpost);
  */
 // Note: ER_BAD_FIELD_ERROR: Unknown column 'id' in 'field list'
 // ... Table does not have primary key
@@ -271,12 +296,13 @@ function crudpost(req, res) {
 
 // http://stackoverflow.com/questions/8158244/how-to-update-a-record-using-sequelize-for-node
 /** Update single entry of a type by id by HTTP PUT.
- * Route pattern must have params: ":type", ":idval"
- * REST Response will have the complete entry after update in it.
- * @example
- * var crudrest = require('crudrest');
- * // ...
- * router.put("/:type/:idval", crudrest.crudput);
+ * Route pattern must have params: ":type", ":idval".
+ * PUT Request Body must contain the JSON to update entry.
+ * After successful update REST Response will have the complete entry as JSON in it.
+ * 
+ *     var crudrest = require('crudrest');
+ *     // ...
+ *     router.put("/:type/:idval", crudrest.crudput);
  */
 function crudput (req, res) {
   
@@ -322,12 +348,13 @@ function crudput (req, res) {
 /** Delete single entry of a type by id by HTTP DELETE.
  * Route pattern must have params: ":type", ":idval"
  *
- * @todo Account for softdelete
- * @example
+ * 
+ * 
  *     var crudrest = require('crudrest');
  *     // ...
  *     router.delete("/:type/:idval", crudrest.cruddelete);
  * 
+ * @todo Account for softdelete
  */
 function cruddelete (req, res) {
   
@@ -385,10 +412,12 @@ function cruddelete (req, res) {
 /** Fetch/Retrieve single entry by type and id using HTTP GET method.
  * Route pattern must have params: ":type", ":idval"
  * 
- * @example
- * var crudrest = require('crudrest');
- * // ...
- * router.get("/:type/:idval", crudrest.crudgetsingle);
+ *     // Server side - setup route
+ *     var crudrest = require('crudrest');
+ *     // ...
+ *     router.get("/:type/:idval", crudrest.crudgetsingle);
+ * NOTE: Any filter components (sent as GET URL k-v params) are ignored by this method (only :idval param
+ * is used for the entry lookup).
  */
 function crudgetsingle (req, res) {
   var jr = {'ok': 1};
@@ -425,6 +454,7 @@ function crudgetsingle (req, res) {
  *     $http.get("/products", {params: {vendor: "Cray"}}).success(...)
  *
  * Sorting the results - use reserved parameter "_sort"
+ *
  *     // Single sort criteria
  *     $http.get("/products", {params: {vendor: "Cray", _sort: "model,ASC"}}).success(...)
  *     // Multiple sort properties (sort direction specifier ASC/DESC is optional)
@@ -478,6 +508,90 @@ function crudgetmulti (req, res)  {
     res.send(d);
   });
 }
+
+/** Execute multi-faceted CUD (Create AND/OR Update AND/OR Delete) Operation
+ * in HTTP PUT request.
+ * Items of same type (by route param ":type") are passed in a single JSON Array of Objects (AoO).
+ * Apply following logic to decide what to do (In terms od C,U,D) with each item:
+ * - Have a predifined (configured) flag-like property (e.g. "deleted") in Object AND have (true valued) primary key property => DELETE
+ * - Entry has primary key property => UPDATE
+ * - No primary key property => INSERT
+ *
+ * Notes:
+ * - This crud method does not manage relationships. The foreign key ID:s (e.g. to parent entry) must be right in JSON (PUT) data sent
+ * - Entries must be compliant with schema attributes to be processed successfully. There is no custom validation (outside standard Sequelize validation)
+ * - There is no support for softdelete (currently)
+ * Recommended CRUD PUT URL: /:type/
+ * 
+ * Data example (commented with JSON-violating JS comments for clarity):
+ *
+ *      [
+ *        {"name":"Luke Jefferson"}, // C - Create
+ *        {"id": 3455, "title":"Vice President"}, // U - Update
+ *        {"id": 45, "deleted": 1} // D - Delete
+ *      ]
+ * @todo Possibly (optionally ?) return entries inserted and updated.
+ */ 
+function mixedbatchmod(req, res) {
+  var delprop = cropts["mixeddelprop"] || "deleted";
+  var ents = req.body; // AoO
+  var otype = req.params['type'];
+  if (!Array.isArray(ents)) {sendcruderror("Not an Array of "+ otype + " ents for mixed processing", null, res);return;}
+  var smodel = getpersister(otype, res);
+  if (!smodel) {return;}
+  var pka = smodel.primaryKeyAttribute;
+  if (!pka) {sendcruderror("No pkey for "+ otype + " (for mixed processing)", null, res);return;}
+  var delids = [];
+  var arr_up = [];
+  var arr_ins = [];
+  var jr = {"ok": 1};
+  var debug = 3;
+  // Pre-process into sets of del/up/ins.
+  ents.forEach(function (e) {
+    // Check that we have object
+    //if () {return;} // console.log("Non-Object ...");
+    if (e[delprop] && e[pka]) {delids.push(e[pka]);}
+    else if (e[pka]) {arr_up.push(e);}
+    else {arr_ins.push(e);}
+  });
+  console.log("Mixed: Deletes(flagged):" + delids.length + ", Updates(have-id): " + arr_up.length + ", Inserts(no-id):" + arr_ins.length);
+  var delfilter = {where: {}};
+  var upfilter = {where: {}}; // upfilter.where[pka] = -1;
+  var arr_prom = [];
+  // TODO: Allow dry-run (for debugging) ?
+  
+  // Deletes: Bulk by where-filter with id:s
+  if (delids.length) { delfilter.where[pka] = delids;arr_prom.push(smodel.destroy(delfilter)); }
+  // Insert/Create: Do in Bulk
+  if (arr_ins.length) {arr_prom.push(smodel.bulkCreate(arr_ins));}
+  // Updates: need to be done individually. There is no bulk-update.
+  if (arr_up.length) {
+    arr_up.forEach( function (e) {
+      upfilter.where[pka] = e[pka];
+      arr_prom.push(smodel.update(e, upfilter));
+    } );
+  }
+  var i = 0;
+  // async.map() callback to process single promise (and probe its success)
+  function processcrudpromise (pr, cb) {
+    // Way to probe what kind of promise we're dealing with ?
+    if (debug > 2) { console.log("Processing Promise " + i); i++; }
+    pr.then(function (somedata) { cb(null, "ok"); }).catch(function (ex) { cb(ex, null); });
+  }
+  // TODO: Treat promises like "data params" and use async.map() to process them
+  async.map(arr_prom, processcrudpromise, function(err, results) {
+    if (debug > 2) { console.log("Completion Results:"+results.join(',')); } // debug
+    if (err) {sendcruderror("Failed mixed C,U,D processing (via promises)", null, res);return;}
+    jr.stats = {up: arr_up.length, ins: arr_ins.length, del: delids.length};
+    
+    var d = respcb ? respcb(jr, "mixedop") : jr;
+    // TODO: Return modification statistics
+    res.send(d);
+  });
+  
+  
+}
+
 /** Add Sort/Order components from request parameters to Sequelize filter (if any).
  * Has a side effect of removing all Sort/Order query parameters from request (req) to not
  * treat them as where filter components later.
@@ -515,7 +629,7 @@ function probe_sort(req, filter) {
   });
   // Add Sequelize "order" param to filter to use in later query.
   // OLD: filter.order = order.filter(function (it) {return it;}); // Strip null:s
-  var order = order.filter(function (it) {return it;});
+  order = order.filter(function (it) {return it;}); // OLD: var odder (dup decl)
   // Get rid of '_sort'
   delete(qp['_sort']);
   return order;
@@ -525,7 +639,7 @@ function probe_sort(req, filter) {
  * For more granular routing setup do a similar reouter calls directly in your own app.
  * You can still have all routes setup here under a sub-path (coordinated by express routing, see
  * example below).
- * @example
+ *
  *     var router = express.Router({caseSensitive: 1});
  *     crudrest.defaultrouter(router);
  *     // ...
@@ -541,6 +655,9 @@ function defaultrouter(router) {
    // Options or AC (Based on this pattern must be early)
    // TODO: Have this SEPARATELY "connectable"
    // router.get(/^\/ac\/?/, opt_or_ac);
+   
+   // NEW
+   router.put  ("/:type", mixedbatchmod);
    
    router.post  ("/:type", crudpost); // POST 1 arg: type
    router.put   ("/:type/:idval", crudput); // PUT 2 args: type,id
@@ -559,6 +676,7 @@ module.exports.router = router; // ????
 /** Set Sequelize ORM/persister config.
  * Persister cache should be pre-indexed as described by documentation main page.
  * @param {object} pc - Indexed ORM map
+ * @todo Create example
  */
 function setperscache (pc) {
   // TODO: Allow array form to be passed. Problem: need sequelize
