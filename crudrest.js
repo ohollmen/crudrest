@@ -256,11 +256,13 @@ function sendcruderror(basemsg, ex, res) {
 
 /** Insert/Create a single entry of type by HTTP POST.
  * Route pattern must have params: ":type"
- * 
+ * The request body must have JSON entry (as Object) to store into DB.
  * 
  *     var crudrest = require('crudrest');
  *     // ...
  *     router.post("/:type/", crudrest.crudpost);
+ * Note: This haslder also works for arrays.
+ * @todo: Support fields:[...]
  */
 // Note: ER_BAD_FIELD_ERROR: Unknown column 'id' in 'field list'
 // ... Table does not have primary key
@@ -271,6 +273,7 @@ function crudpost(req, res) {
   var otype = req.params['type'];
   console.log("POST: OType: " + otype);
   var jr = {'ok': 1};
+
   // Lookup persister
   var smodel = getpersister(otype, res); //  [object SequelizeModel]
   // Not twice: jr.ok = 0;jr.msg = "No Model";res.send(jr);
@@ -281,17 +284,35 @@ function crudpost(req, res) {
   // var f = preproc(smodel); // 'create'
   // if (f) {f( req.body, req, smodel);} // apply ...
   // Traditional try / catch will NOT work here
-  // req.body as array also works.
+  // NOT: req.body as array also works for create().
+  // Whats diff. with bulkCreate() (?):
+  // bulkCreate will not have autoinc attributes, bulkCreate (also) supports fields:[...]
+  // sendcruderror("Insert: Not an object.",ex,res);
+  if (Array.isArray(req.body)) { crudpostmulti(req.body); return;}
   smodel.create(req.body)
-  // .catch(function (ex) {jr.ok = 0;jr.msg = "Creation problem: "+ex.message;console.log(jr.msg);res.send(jr);})
-  .catch(function (ex) {sendcruderror("Creation problem",ex,res);})
+  .catch(function (ex) {sendcruderror("Creation problem ",ex,res);})
   .then(function (ent) {
     if (!ent) {console.log("Likely earlier exception");return;} // Earlier exception
-    console.log("Saved: " + JSON.stringify(ent));
-    //jr.data = ent; // Hard default
+    console.log("Saved(OK): " + JSON.stringify(ent));
     var d = respcb ? respcb(ent, "create") : ent;
     res.send(d);
   });
+  // Multi-insert. NOTE: bulkCreate() will return null for auto-incrementing ID. Only attrs stored will
+  // be returned to then callback (in Objects)
+  function crudpostmulti(arr) {
+    var opts = {};
+    // Note: node/express also parses Q-string on POST
+    var q = req.query;
+    if (q && q._fields) {console.log("Q:", q); opts.fields = q._fields.split(/,\s*/); }
+    console.log("opts:", opts);
+    smodel.bulkCreate(arr, opts)
+    .catch(function (ex) {sendcruderror("Multi-Creation problem ",ex,res);})
+    .then(function (ent) {
+      if (!ent) {console.log("Likely earlier exception (case-multi)");return;}
+      var d = respcb ? respcb(ent, "create") : ent;
+      res.send(d);
+    });
+  }
 }
 
 // http://stackoverflow.com/questions/8158244/how-to-update-a-record-using-sequelize-for-node
@@ -312,9 +333,6 @@ function crudput (req, res) {
   console.log(req.body);
   var smodel = getpersister(otype, res);
   if (!smodel) {return;}
-  //var pka = smodel.primaryKeyAttribute; // primaryKeyField: (scalar), primaryKeyAttributes: (Array)
-  //var whereid = {};
-  //whereid[pka] = idval;
   //var idfilter = {where: whereid, limit: 1};
   var idfilter = getidfilter(smodel, req);
   console.log("PUT: Update Triggered on " + idval);
@@ -324,6 +342,7 @@ function crudput (req, res) {
   //.catch(function (ex) {jr.ok = 0;jr.msg = "No entry: " + ex.message;res.send(jr);})
   .catch(function (ex) {sendcruderror("No entry for update",ex,res);})
   .then(function (ent) {
+    if (!ent) {var msg = "No entry for update";console.log(msg);sendcruderror(msg,ex,res);return;}
     console.log("Seems to exist for update): " + idval);
     smodel.update(req.body, idfilter) // options.limit (mysql)
     // Alternative method (~2012)
@@ -337,7 +356,7 @@ function crudput (req, res) {
       smodel.find(idfilter)
       .catch(function (ex) {sendcruderror("Updated ent reload failure",ex,res);})
       .then(function (ent) {
-        console.log("Updated: " + JSON.stringify(ent));
+        console.log("Updated: ", ent);
         var d = respcb ? respcb(ent, "update") : ent;
         res.send(d);
       }); // end of re-fetch/then
@@ -354,7 +373,15 @@ function crudput (req, res) {
  *     // ...
  *     router.delete("/:type/:idval", crudrest.cruddelete);
  * 
- * @todo Account for softdelete
+ * ## Automatic soft-delete
+ *
+ * Automatic soft-delete is triggered when following conditions are met:
+ *
+ * - Crud module option "softdelattr" is set to true (string) value
+ * - It is found to be a valid declated attribute of current Sequelize entity-type (:type)
+ * - Above contions imply that entity types that do not have the "universal" soft-delete attribute in
+ *   their sequelize model are hard deleted (no auto-soft-delete has chance to kick in because of
+ *   missing attribute)
  */
 function cruddelete (req, res) {
   
@@ -362,7 +389,7 @@ function cruddelete (req, res) {
   var otype = req.params['type'];
   var idval = req.params['idval']; // Keep for error handling
   console.log("DELETE: entry(id) " + idval + " of type: " + otype);
-  console.log(req.body);
+  // console.log(req.body); // Shows "{}" on empty body.
   var smodel = getpersister(otype, res);
   if (!smodel) {return;}
   //////////////////////////
@@ -379,7 +406,7 @@ function cruddelete (req, res) {
   // Soft delete => UPDATE (need attr and value)
   if (cropts.softdelattr && hasattribute(smodel, cropts.softdelattr)) { // smodel.hasAttr(sdattr)
     var softdel = cropts.softdeleted;
-    if (typeof softdel !== 'object') {sendcruderror("Soft delete no properly configured", null, res);}
+    if (typeof softdel !== 'object') {sendcruderror("Soft delete not properly configured", null, res);}
     console.log("Soft-delete mode: Use update setter", softdel);
     smodel.update(softdel, idfilter)
     .catch(function (ex) {sendcruderror("Failed to SoftDelete", ex, res);})
@@ -422,20 +449,16 @@ function cruddelete (req, res) {
 function crudgetsingle (req, res) {
   var jr = {'ok': 1};
   var otype = req.params['type'];
-  // OLD: var idval = req.params[1];
   var smodel = getpersister(otype, res);
   if (!smodel) {return;}
   var idfilter = getidfilter(smodel, req);
   console.log("GET single by: " + JSON.stringify(idfilter));
   smodel.find(idfilter)
-  //.catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
   .catch(function (ex) {sendcruderror("No Entry Found",ex,res);})
   .then(function (ent) {
-    //jr.ok = num;
-    //if (!num) {jr.msg = "No such entry: " + idval;}
     console.log("Got single: " + JSON.stringify(ent));
-    // if (!num) {return;} // Earlier exception
-    var d = respcb ? respcb(ent, "retrieve") : ent;
+    // if (!ent) {return;} // Earlier exception or ent == null
+    var d = respcb ? respcb(ent, "retrieve") : ent; // FIXME: ent may be null
     res.send(d);
   });
 }
@@ -500,7 +523,7 @@ function crudgetmulti (req, res)  {
   //}
   smodel.findAll(filter)
   // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
-  .catch(function (ex) {sendcruderror("No Entries Found",ex,res);})
+  .catch(function (ex) {sendcruderror("No Entries Found.",ex,res);})
   .then(function (arr) {
     // if (!arr) {jr.msg = "No result set array !"; res.send(jr);}
     console.log("Got multiple: " + arr.length + " ents.");
@@ -526,9 +549,9 @@ function crudgetmulti (req, res)  {
  * Data example (commented with JSON-violating JS comments for clarity):
  *
  *      [
- *        {"name":"Luke Jefferson"}, // C - Create
- *        {"id": 3455, "title":"Vice President"}, // U - Update
- *        {"id": 45, "deleted": 1} // D - Delete
+ *        {"name":"Luke Jefferson"}, // C - Create (has no ID, no deleted flag)
+ *        {"id": 3455, "title":"Vice President"}, // U - Update (has ID)
+ *        {"id": 45, "title": "N/A", "deleted": 1} // D - Delete (has deleted flag)
  *      ]
  * @todo Possibly (optionally ?) return entries inserted and updated.
  */ 
