@@ -156,3 +156,5 @@ More on JSDoc: http://usejsdoc.org/
 
 - http://expressjs.com/guide/routing.html
 - http://expressjs.com/4x/api.html#router
+- http://docs.sequelizejs.com/en/latest/
+- http://www.getpostman.com/
