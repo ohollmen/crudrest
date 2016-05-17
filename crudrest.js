@@ -24,11 +24,13 @@ var cropts = {
   softdeleted: null, // Softdeletion sequelize update (Object, e.g {active: 0})
   softactive: null, // Soft delete active state (not deleted) as sequelize filter (Object, e.g. {where: {active {"ne": 0}}
   mixeddelprop: null, // "isDeleted" property for mixed C,U,D processing, denoting deletion
-  debug: 0 // TODO: Start using debug flag across the module
+  debug: 0, // TODO: Start using debug flag across the module
+  incmap: null
 };
 /** Internal static method to create ID based filter for Sequelize CRUD Operations.
  * The crudrest module convention requires to have parameter ":idval"
- * in the route URL, which will be used here to resolve id.
+ * in the route URL, which will be used here to resolve entry id.
+ * Note: req.params will not be modified in any way here.
  * @param {object} smodel - Sequelize model (for a entity type)
  * @param {object} req - Node.js / Express HTTP request (from whose params the ID filter will be extracted).
  * 
@@ -130,12 +132,39 @@ function opts(cropts_p) {
   if (cropts_p) {cropts = cropts_p;}
   return(cropts);
 }
+// Test if the Sequelize model for a schema has the named attribute.
+// @param {object} model - Sequelize model definition
+// @param {string}  attr - Attribute name expected to be found in schema model
+// @return Tru3e (1) value for attribute found, False (0) for not found.
 function hasattribute (model, attr) {
    if (typeof model !== 'object') {return 0;}
    // TODO: Find out if there is high-level Sequelize accessor for this.
    if (model.tableAttributes[attr]) {return 1;}
    return 0;
 }
+/*
+* 
+* @param req - Request with optional :inc route parameter (for inclusion profile label from route URL)
+* @param filter - Sequelize find (findAll,findOne) filter parameter to add inclusion to.
+* @return number of entry inclusions or -1 for error (ambiguous inclusion). Add inclusions to filter.
+* @todo Weed out err comm from here to have more caller flexibility. Throw errors ?
+*/
+function addfindinclusions (req, resp, filter) {
+  var inclbl = req.params['inc'];
+  if (!inclbl) { return 0; } // No Inclusions
+  // Mandate inclbl to be in dot-not ?
+  // var m = inclbl.match(/^(\w+)\.(\w+)$/);
+  // if (!m) { sendcruderror("Inclusion label not in correct format", null, resp); return -1; }
+  var incmap = cropts[incmap];
+  if (!incmap) { sendcruderror("No Inclusion map", null, resp); return -1; }
+  var inc = incmap[inclbl]; // Array (as dictated by Sequelize). 
+  if (!Array.isArray(inc)) { sendcruderror("Inclusion map not in array!", null, resp); return -1; }
+  // TODO: Check type from inclbl (in t.prof dot-notation ?) ? OR ... trust passed inc ?
+  // 
+  idfilter.include = inc; // Add find-include
+  return(inc.length);
+}
+
 /** Temporary AC handler.
  * Lookup options source from server side config.
  * To use this, 2 server Server side configurations must be assigned to module variables:
@@ -154,21 +183,22 @@ function hasattribute (model, attr) {
 function opt_or_ac (req, res) {
    "use strict";
    var ta = req.query["ta"]; // OR: req.params["ta"] (Allowed below)
-   // Support alternative server URL route embedding of ta notation
+   // Support alternative server URL route embedding of ta parameter
+   // TODO: Make this primary
    if (!ta && req.params['ta']) {ta = req.params['ta'];}
-   console.log("opt_or_ac");
+   console.log("Run opt_or_ac");
    var term = req.query["term"];
    // OLD: ... 
    if (!ta) { sendcruderror("No ta parameter", null, res); return; } //  // throw "No ta parameter";
    // ta.match(/^\w+\.\w+/) // OR search ?
    if (ta.indexOf('.') < 1) {throw "ta in wrong format (missing dot)";} // Later regexp
    if (!taidx || typeof taidx !== 'object') {throw "No taidx available";}
-   var optinfo = taidx[ta];
-   if (!optinfo) {throw "No ta entry for " + ta + " in " + taidx + "(Use taidx() )";} // TODO: Array
+   var optinfo = taidx[ta]; // Array: 
+   if (!optinfo) {throw "No ta entry for '" + ta + "' in " + taidx + "(Use taidx() to set)";} // TODO: Array
    // Support static / constant options (rawlist, keyvallist)
    if (Array.isArray(optinfo[1])) {
       // 
-      res.send(JSON.stringify(optinfo[1]));return;
+      res.send(optinfo[1]);return;
    }
    // Check file (missing last / 3) && !optinfo[3]
    //if (optinfo[1].indexOf('/') ) {
@@ -200,7 +230,7 @@ function opt_or_ac (req, res) {
    if (!smodel) {return;}
    var filter = {};
    if (term) { filter.where = [optinfo[3]+' LIKE ?', term + '%'];console.log("Got term:" + term);}
-   console.log("Using filter: " + JSON.stringify(filter));
+   console.log("Using filter: ", filter);
    var jr = {'ok': 1};
    // Sequelize raw query
    // http://docs.sequelizejs.com/en/1.7.0/docs/usage/ => Executing raw SQL queries
@@ -212,14 +242,14 @@ function opt_or_ac (req, res) {
    //sequelize.query(qs, null, {raw: true, plain: false}) // , replacements: qpara (This form dulicates result sets => AoAoH)
    sequelize.query(qs,{type: sequelize.QueryTypes.SELECT}) // This (overload) form does not duplicate result sets
    //smodel.findAll(filter)
-   .catch(function (ex) {jr.ok = 0;jr.msg = "Search error: "+ ex.message;res.send(jr);})
+   
    .then(function (arr) {
      if (!arr) {jr.msg = "No result set array !"; } // res.send(jr);
      // NOTE: Sequelize 2.1.0 hash AoAoH and duplicates result set wrapped by extra array (!?)
      // 2.1.3 ...
      else {
        console.log("Got multiple: " + arr.length + " ents. from: " + optinfo[1]);
-       console.log(JSON.stringify(arr));
+       console.log(arr);
        // Hi-level sequelize -> Need to map original/ ACTUAL field name(s) array to value, label
        //arr = arr.map(function (it) {
        //  var e = {'value' : it[optinfo[2]], 'label': it[optinfo[3]]};
@@ -227,9 +257,11 @@ function opt_or_ac (req, res) {
        // return e;
        //});
      }
-     res.send(JSON.stringify(arr));
-   });
-   
+     res.send(arr);
+   })
+   // TODO: sendcruderror()
+   // .catch(function (ex) {jr.ok = 0;jr.msg = "Search error: "+ ex.message;res.send(jr);});
+   .catch(function (ex) {sendcruderror("Search error: ", ex, res);});
 }
 /** Internal method to send exception based Sequelize error messages to client.
  * Message is also replicated on server console.
@@ -252,7 +284,7 @@ function sendcruderror(basemsg, ex, res) {
    res.send(jr);
    console.log(jr.msg);
 }
-/************************** CRUD ***************************/
+/* ************************* CRUD ************************** */
 
 /** Insert/Create a single entry of type by HTTP POST.
  * Route pattern must have params: ":type"
@@ -278,8 +310,8 @@ function crudpost(req, res) {
   var smodel = getpersister(otype, res); //  [object SequelizeModel]
   // Not twice: jr.ok = 0;jr.msg = "No Model";res.send(jr);
   if (!smodel) {return;}
-  //console.log("Dump: " + JSON.stringify(req.body));jr.id = 6666666;jr.msg = "Things ok in debug mode";
-  //res.send(JSON.stringify(jr));return; // DEBUG
+  //console.log("POST Dump: ", req.body);jr.id = 6666666;jr.msg = "Things ok in debug mode";
+  //res.send(jr);return; // DEBUG
   // Intercept with a callback (validate, add timestamps, check access permissions ...)
   // var f = preproc(smodel); // 'create'
   // if (f) {f( req.body, req, smodel);} // apply ...
@@ -290,13 +322,13 @@ function crudpost(req, res) {
   // sendcruderror("Insert: Not an object.",ex,res);
   if (Array.isArray(req.body)) { crudpostmulti(req.body); return;}
   smodel.create(req.body)
-  .catch(function (ex) {sendcruderror("Creation problem ",ex,res);})
   .then(function (ent) {
     if (!ent) {console.log("Likely earlier exception");return;} // Earlier exception
     console.log("Saved(OK): " + JSON.stringify(ent));
     var d = respcb ? respcb(ent, "create") : ent;
     res.send(d);
-  });
+  })
+  .catch(function (ex) {sendcruderror("Creation problem ",ex,res);});
   // Multi-insert. NOTE: bulkCreate() will return null for auto-incrementing ID. Only attrs stored will
   // be returned to then callback (in Objects)
   function crudpostmulti(arr) {
@@ -306,12 +338,12 @@ function crudpost(req, res) {
     if (q && q._fields) {console.log("Q:", q); opts.fields = q._fields.split(/,\s*/); }
     console.log("opts:", opts);
     smodel.bulkCreate(arr, opts)
-    .catch(function (ex) {sendcruderror("Multi-Creation problem ",ex,res);})
     .then(function (ent) {
       if (!ent) {console.log("Likely earlier exception (case-multi)");return;}
       var d = respcb ? respcb(ent, "create") : ent;
       res.send(d);
-    });
+    })
+    .catch(function (ex) {sendcruderror("Multi-Creation problem ",ex,res);});
   }
 }
 
@@ -339,29 +371,36 @@ function crudput (req, res) {
   console.log(req.body);
   // Need to find entry first (share id filter with update)
   smodel.find(idfilter)
-  //.catch(function (ex) {jr.ok = 0;jr.msg = "No entry: " + ex.message;res.send(jr);})
-  .catch(function (ex) {sendcruderror("No entry for update",ex,res);})
+  
   .then(function (ent) {
-    if (!ent) {var msg = "No entry for update";console.log(msg);sendcruderror(msg,ex,res);return;}
+    if (!ent) {var msg = "No entry for update";console.log(msg);sendcruderror(msg,new Error("No entry by id:"+idval),res);return;}
     console.log("Seems to exist for update): " + idval);
     smodel.update(req.body, idfilter) // options.limit (mysql)
     // Alternative method (~2012)
     // ent.updateAttributes(req.body).success(...)
-    // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
-    .catch(function (ex) {sendcruderror("Update failure",ex,res);})
+    
     // This seems to gain: [1]
     .then(function (ent) {
       if (!ent) {console.log("PUT: Exception ?");return;} // Earlier exception
       // Need to find again ? Need to reconfig idfilter ?
       smodel.find(idfilter)
-      .catch(function (ex) {sendcruderror("Updated ent reload failure",ex,res);})
+      
       .then(function (ent) {
         console.log("Updated: ", ent);
         var d = respcb ? respcb(ent, "update") : ent;
         res.send(d);
-      }); // end of re-fetch/then
-    }); // end of update/then
-  }); // end of find/then
+      })
+      .catch(function (ex) {sendcruderror("Updated ent reload failure",ex,res);});
+      
+      // end of re-fetch/then
+    })
+    // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+    .catch(function (ex) {sendcruderror("Update failure",ex,res);});
+    // end of update/then
+  })
+  //.catch(function (ex) {jr.ok = 0;jr.msg = "No entry: " + ex.message;res.send(jr);})
+  .catch(function (ex) {sendcruderror("No entry for update",ex,res);});
+   // end of find/then
 }
 
 /** Delete single entry of a type by id by HTTP DELETE.
@@ -409,18 +448,16 @@ function cruddelete (req, res) {
     if (typeof softdel !== 'object') {sendcruderror("Soft delete not properly configured", null, res);}
     console.log("Soft-delete mode: Use update setter", softdel);
     smodel.update(softdel, idfilter)
-    .catch(function (ex) {sendcruderror("Failed to SoftDelete", ex, res);})
     .then(function (num) {
        console.log("Sofdel (update) ret: ", num);
        var d = respcb ? respcb(jr, "delete") : jr;
        res.send(d);
-    });
+    })
+    .catch(function (ex) {sendcruderror("Failed to SoftDelete", ex, res);});
   }
-  // Real DELETE
+  // Real DELETE (non-soft)
   else {
     smodel.destroy(idfilter)
-    // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
-    .catch(function (ex) {sendcruderror("Failed to Delete",ex,res);})
     .then(function (num) {
       jr.ok = num;
       jr.idval = idval;
@@ -429,7 +466,9 @@ function cruddelete (req, res) {
       // if (!num) {return;} // Earlier exception
       var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
       res.send(d);
-    });
+    })
+    // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+    .catch(function (ex) {sendcruderror("Failed to Delete:",ex,res);});
   }
 }
 
@@ -443,6 +482,7 @@ function cruddelete (req, res) {
  *     var crudrest = require('crudrest');
  *     // ...
  *     router.get("/:type/:idval", crudrest.crudgetsingle);
+ *
  * NOTE: Any filter components (sent as GET URL k-v params) are ignored by this method (only :idval param
  * is used for the entry lookup).
  */
@@ -451,16 +491,17 @@ function crudgetsingle (req, res) {
   var otype = req.params['type'];
   var smodel = getpersister(otype, res);
   if (!smodel) {return;}
-  var idfilter = getidfilter(smodel, req);
+  var idfilter = getidfilter(smodel, req); // From: req.params.idval
+  // if (addfindinclusions(req, resp, idfilter) < 0) {return; }
   console.log("GET single by: " + JSON.stringify(idfilter));
   smodel.find(idfilter)
-  .catch(function (ex) {sendcruderror("No Entry Found",ex,res);})
   .then(function (ent) {
-    console.log("Got single: " + JSON.stringify(ent));
-    // if (!ent) {return;} // Earlier exception or ent == null
+    if (!ent) { sendcruderror("No Entry Found!",new Error(" id:" + req.params.idval), res);return; } // Earlier exception or ent == null
+    console.log("Got single(by:"+req.params.idval+"): " + JSON.stringify(ent));
     var d = respcb ? respcb(ent, "retrieve") : ent; // FIXME: ent may be null
     res.send(d);
-  });
+  })
+  .catch(function (ex) {sendcruderror("No Entry Found",ex,res);});
 }
 
 /** Get multiple (default all) of type using HTTP GET method.
@@ -482,7 +523,10 @@ function crudgetsingle (req, res) {
  *     $http.get("/products", {params: {vendor: "Cray", _sort: "model,ASC"}}).success(...)
  *     // Multiple sort properties (sort direction specifier ASC/DESC is optional)
  *     $http.get("/products", {params: {vendor: "Cray", _sort: ["model,ASC", "mfgdate"]}}).success(...)
+ *     // Same as raw URL
+ *     // /products?vendor=Cray&_sort=model,ASC&_sort=mfgdate
  *
+ * For more sort examples, see probe_sort() documentation.
  */
 function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
@@ -492,14 +536,14 @@ function crudgetmulti (req, res)  {
   // sendcruderror("No Model Found for "+ otype, null, res);
   if (!smodel) {return;}
   var filter = {}; // Add where: {} ?
-  // If parameters, add to filter here.
+  // If there are any k-v parameters, add them to filter here.
   // TODO: Check type of Object
   if (req.query && Object.keys(req.query).length) {
     // Call probe_sort() to figure out "order" for Sequelize (param key '_sort')
     // Having no '_sort' param changes nothing.
-    var order = probe_sort(req, filter); // No ret value, modifies filter and req.query
+    var order = probe_sort(req); // No ret value, modifies filter and req.query // OLD: , filter
     var keys = Object.keys(req.query);
-    console.log("Have query params: " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
+    console.log("Have query params (for multi): " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
     // Note: Treat Array val specially (or let the normal thing happen ?)
     keys.forEach(function (k) {filter[k] = req.query[k];});
     // Wrap in Sequelize compatible (format is more complex than meets the eye)
@@ -508,7 +552,7 @@ function crudgetmulti (req, res)  {
     console.log("Assembled filter (Seq): " + JSON.stringify(filter));
   }
   else {console.log("Do NOT Have query filter (no keys found)");}
-  // Check softdel filter
+  // Check the need for softdel filter (TODO: selectsoftdel or softdelsel)
   // Soft del attribute explicitly already in filter - honor the value given (make exclusive to auto-softdetele-filter)
   //if (cropts.softdelattr && filter.where && filter.where[cropts.softdelattr]) {} // return ...
   // else ... Automatic softdel (optim. hasattribute() to be last)
@@ -522,14 +566,30 @@ function crudgetmulti (req, res)  {
   //  console.log("Final Sequelize soft-active query filter: ", filter);
   //}
   smodel.findAll(filter)
-  // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
-  .catch(function (ex) {sendcruderror("No Entries Found.",ex,res);})
   .then(function (arr) {
     // if (!arr) {jr.msg = "No result set array !"; res.send(jr);}
     console.log("Got multiple: " + arr.length + " ents.");
     var d = respcb ? respcb(arr, "retrieve") : arr;
     res.send(d);
-  });
+  })
+  // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
+  .catch(function (ex) {sendcruderror("No Entries Found.",ex,res);});
+  
+  // TODO: Parse _join (list of tabs). Assume natural JOIN (for ease ...)
+  // http://stackoverflow.com/questions/20460270/how-to-make-join-querys-using-sequelize-in-nodejs
+  // var addattrs = ","+joined.map(function (jt) {return jt+".*";}).join(", ");
+  // var i = 1;joined.unshift(otype);
+  // var joins = joined.map(function (jt) { return " NATURAL JOIN "+jt; });
+  // seq.query("SELECT "+otype+".* "+addattrs+" FROM "+otype+"");
+}
+// Generate a very simple SQL (AND-based) filter out of a filter-object
+// TODO: Check attrs validity in regards to model (pass: model, fobj).
+function filter2sql(fobj) {
+  // Check Object param validity
+  // if (!) {return "";}
+  var wcomp = [];
+  Object.keys(fobj).forEach(function (k) { wcomp.push(fobj[k]); });
+  return wcomp.join(" AND ");
 }
 
 /** Execute multi-faceted CUD (Create AND/OR Update AND/OR Delete) Operation
@@ -540,6 +600,7 @@ function crudgetmulti (req, res)  {
  * - Entry has primary key property => UPDATE
  * - No primary key property => INSERT
  *
+ * The property to label entities to be delete is configurable via CRUD options (see opts() method, defaults to "deleted").
  * Notes:
  * - This crud method does not manage relationships. The foreign key ID:s (e.g. to parent entry) must be right in JSON (PUT) data sent
  * - Entries must be compliant with schema attributes to be processed successfully. There is no custom validation (outside standard Sequelize validation)
@@ -551,13 +612,13 @@ function crudgetmulti (req, res)  {
  *      [
  *        {"name":"Luke Jefferson"}, // C - Create (has no ID, no deleted flag)
  *        {"id": 3455, "title":"Vice President"}, // U - Update (has ID)
- *        {"id": 45, "title": "N/A", "deleted": 1} // D - Delete (has deleted flag)
+ *        {"id": 45, "title": "N/A", "deleted": 1} // D - Delete (has ID AND deleted flag)
  *      ]
  * @todo Possibly (optionally ?) return entries inserted and updated.
  */ 
 function mixedbatchmod(req, res) {
-  var delprop = cropts["mixeddelprop"] || "deleted";
-  var ents = req.body; // AoO
+  var delprop = cropts["mixeddelprop"] || "deleted"; // TODO: default to _deleted
+  var ents = req.body; // Entries in AoO
   var otype = req.params['type'];
   if (!Array.isArray(ents)) {sendcruderror("Not an Array of "+ otype + " ents for mixed processing", null, res);return;}
   var smodel = getpersister(otype, res);
@@ -570,7 +631,7 @@ function mixedbatchmod(req, res) {
   var jr = {"ok": 1};
   var debug = 3;
   // Pre-process into sets of del/up/ins.
-  ents.forEach(function (e) {
+  ents.forEach(function (e) {  // e = Entry
     // Check that we have object
     //if () {return;} // console.log("Non-Object ...");
     if (e[delprop] && e[pka]) {delids.push(e[pka]);}
@@ -619,12 +680,18 @@ function mixedbatchmod(req, res) {
  * Has a side effect of removing all Sort/Order query parameters from request (req) to not
  * treat them as where filter components later.
  * Sort/Order components are picked up from query parameter "_sort" with following options
- * - value should be attr name with optional direction parameter separated by comma
+ * - value should be attr name with optional direction parameter separated by comma (e.g. ...&_sort=age,DESC&...)
  * - If direction parameter is missing, 'ASC' is used
- * - One or more Sort/Order components can be passed
- * Returns Sequelize "order" parameter to where filter definition passed here
+ * - One or more Sort/Order components can be passed (Add each as separate component)
+ * 
+ * Example query URL (One flter component, Two sort components, One of the two gives explicit sort direction)
+ *
+ *     http://crudserver/crud/projects?_sort=projname&_sort=starttime,DESC&customerid=698
+ *
+ * @param {object} req - Request Object (to access the URL params embedded filter passed in query key "_sort")
+ * @return Sequelize "order" parameter to where filter definition passed here
  */
-function probe_sort(req, filter) {
+function probe_sort(req) { // OLD: , filter
   var qp = req.query;
   
   if (!qp) {return;} // No query !
@@ -652,6 +719,7 @@ function probe_sort(req, filter) {
   });
   // Add Sequelize "order" param to filter to use in later query.
   // OLD: filter.order = order.filter(function (it) {return it;}); // Strip null:s
+  // NEW: sort definition is returned as a structure to be embedded by caller (!)
   order = order.filter(function (it) {return it;}); // OLD: var odder (dup decl)
   // Get rid of '_sort'
   delete(qp['_sort']);
@@ -698,15 +766,17 @@ function defaultrouter(router) {
 module.exports.router = router; // ????
 /** Set Sequelize ORM/persister config.
  * Persister cache should be pre-indexed as described by documentation main page.
- * @param {object} pc - Indexed ORM map
+ * 
+ * @param {object} pc - Indexed ORM map (or Array for auto-indexing by crudrest module)
+ * @param {object} sequelize - Optional Sequelize instance for Array usecase described for first (pc) parameter
  * @todo Create example
  */
-function setperscache (pc) {
-  // TODO: Allow array form to be passed. Problem: need sequelize
-  if (Array.isArray(pc)) {
+function setperscache (pc, sequelize) {
+  // TODO: Allow array form to be passed. Problem: we depend on sequelize, must be passed for case "Array"
+  if (Array.isArray(pc) && sequelize) {
      pc.forEach(function (item) {
        var tn = item[1].tableName;
-       //perscache[tn] = sequelize.define(tn, item[0], item[1]);
+       perscache[tn] = sequelize.define(tn, item[0], item[1]);
      });
      return;
   }
@@ -727,10 +797,12 @@ module.exports.crudput = crudput;
 module.exports.cruddelete = cruddelete;
 module.exports.crudgetsingle = crudgetsingle;
 module.exports.crudgetmulti = crudgetmulti;
+module.exports.mixedbatchmod =  mixedbatchmod;
 // More helpers
 module.exports.opt_or_ac = opt_or_ac;
 module.exports.setrespcb = setrespcb;
 module.exports.seterrhdlr = seterrhdlr;
 module.exports.settaidx = settaidx;
 module.exports.opts = opts;
+
 
