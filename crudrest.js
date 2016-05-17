@@ -515,18 +515,26 @@ function crudgetsingle (req, res) {
  *     router.get("/:type", crudrest.crudgetmulti);
  *     // ...
  *     // On client side (pass search filter for vendor)
- *     $http.get("/products", {params: {vendor: "Cray"}}).success(...)
+ *     $http.get("/products", {params: {vendor: "Cray"}}).then(...)
  *
  * Sorting the results - use reserved parameter "_sort"
  *
  *     // Single sort criteria
- *     $http.get("/products", {params: {vendor: "Cray", _sort: "model,ASC"}}).success(...)
+ *     $http.get("/products", {params: {vendor: "Cray", _sort: "model,ASC"}}).then(...)
  *     // Multiple sort properties (sort direction specifier ASC/DESC is optional)
- *     $http.get("/products", {params: {vendor: "Cray", _sort: ["model,ASC", "mfgdate"]}}).success(...)
+ *     $http.get("/products", {params: {vendor: "Cray", _sort: ["model,ASC", "mfgdate"]}}).then(...)
  *     // Same as raw URL
  *     // /products?vendor=Cray&_sort=model,ASC&_sort=mfgdate
  *
  * For more sort examples, see probe_sort() documentation.
+ * Get multiple by entry ID:s
+ *
+ *     // Equivalent to raw GET /products?id=4&id=7&id=11&id=18&id=45
+ *     $http.get("/products", {params: {id: [4, 7, 11, 18, 45]}}).then(...)
+ *
+ * ... Although most of the time you are likely to get the associated entries by their parent id:
+ *
+ *     $http.get("/products", {params: { parent: 34778} }).then(...)
  */
 function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
