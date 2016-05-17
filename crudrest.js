@@ -642,9 +642,9 @@ function mixedbatchmod(req, res) {
   ents.forEach(function (e) {  // e = Entry
     // Check that we have object
     //if () {return;} // console.log("Non-Object ...");
-    if (e[delprop] && e[pka]) {delids.push(e[pka]);}
-    else if (e[pka]) {arr_up.push(e);}
-    else {arr_ins.push(e);}
+    if (e[delprop] && e[pka]) {delids.push(e[pka]);} // Deletes
+    else if (e[pka]) {arr_up.push(e);} // Updates
+    else {arr_ins.push(e);} // Inserts
   });
   console.log("Mixed: Deletes(flagged):" + delids.length + ", Updates(have-id): " + arr_up.length + ", Inserts(no-id):" + arr_ins.length);
   var delfilter = {where: {}};
@@ -659,8 +659,9 @@ function mixedbatchmod(req, res) {
   // Updates: need to be done individually. There is no bulk-update.
   if (arr_up.length) {
     arr_up.forEach( function (e) {
-      upfilter.where[pka] = e[pka];
-      arr_prom.push(smodel.update(e, upfilter));
+      var upf = JSON.parse(JSON.stringify(upfilter));
+      upf.where[pka] = e[pka];
+      arr_prom.push(smodel.update(e, upf));
     } );
   }
   var i = 0;
