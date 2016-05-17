@@ -15,7 +15,7 @@ Sequelize based REST CRUD persistence.
 
  For a more comprehensive example see the example test app crudrest.server.js in the module distribution.
 
-## Example sequelize config
+## Example Sequelize Config
 
 crudrest utilizes Sequelize and the associated Sequelize schema (table and attribute) definitions to drive
 (i.e. take care of all the details of) persistence. Every HTTP based persistence operation gets thus "filtered" by the Sequelize config layer and
@@ -42,7 +42,7 @@ Sequelize configs for the whole app must be stored in a config file with followi
       },
   
     ];
-    module.exports = seqconfig;
+    module.exports.sargs = seqconfig;
 
 This can be then mapped into an index by entity types (see "tableName" below) that crudrest can use as-is:
 
@@ -133,7 +133,8 @@ When sending new data (POST => INSERT) or updating data (PUT => UPDATE), nested 
 (e.g. arrays of child objects) are not officially supported for now (actually Sequelize has
 ways to cope with this, so stay tuned).
 
-Also the pre-hook mechanism is not supported yet (in other words JSON data payload cannot be currently preprocessed).
+Also the pre-hook mechanism is not supported yet (in other words JSON data payload cannot be currently preprocessed). Sequelize however has some built-in mechanisms for this (and these are likely to work with
+no crudrest support).
 
 ### GET (single entry or multiple)
 
