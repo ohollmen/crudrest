@@ -109,6 +109,10 @@ pseq.sargs.forEach(function (item) {
 // pseq.syncschema(sequelize); // From inside config
 // sequelize.sync().then(function () {console.log("Synced the schema");});
 // process.exit(0);
+if (pseq.entincludes) {
+   // crudrest.opt("incmap", pseq.entincludes); // TODO: opt()
+}
+
 
 var express  = require('express');
 var crudrest = require('./crudrest'); // crudrest.js
