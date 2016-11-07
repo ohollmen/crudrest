@@ -550,14 +550,23 @@ function crudgetmulti (req, res)  {
     // Call probe_sort() to figure out "order" for Sequelize (param key '_sort')
     // Having no '_sort' param changes nothing.
     var order = probe_sort(req); // No ret value, modifies filter and req.query // OLD: , filter
+    // Only Attributes in req.query._attrs
+    // http://docs.sequelizejs.com/en/latest/api/model/
+    var attrs = probe_attr(req);
+    
     var keys = Object.keys(req.query);
     console.log("Have query params (for multi): " + JSON.stringify(req.query) ); // + " keycnt:" + kcnt
     // Note: Treat Array val specially (or let the normal thing happen ?)
     keys.forEach(function (k) {filter[k] = req.query[k];});
     // Wrap in Sequelize compatible (format is more complex than meets the eye)
     filter = kvfilter(filter);
+    // ONLY NOW add order,attributes
     if (order) { filter.order = order; }
+    //if (attrs) { filter.attributes = {include: attrs}; } // Does not work in OLD ?!
+    if (attrs) { filter.attributes = attrs; }
     console.log("Assembled filter (Seq): " + JSON.stringify(filter));
+    
+    
   }
   else {console.log("Do NOT Have query filter (no keys found)");}
   // Check the need for softdel filter (TODO: selectsoftdel or softdelsel)
@@ -673,6 +682,7 @@ function mixedbatchmod(req, res) {
   }
   // TODO: Treat promises like "data params" and use async.map() to process them
   async.map(arr_prom, processcrudpromise, function(err, results) {
+    // Note: This sometimes returned (e.g.) ",," or "ok,ok,,ok" TODO: Follow what these are from
     if (debug > 2) { console.log("Completion Results:"+results.join(',')); } // debug
     if (err) {sendcruderror("Failed mixed C,U,D processing (via promises)", null, res);return;}
     jr.stats = {up: arr_up.length, ins: arr_ins.length, del: delids.length};
@@ -711,6 +721,7 @@ function probe_sort(req) { // OLD: , filter
   // Coerce to array
   if (!Array.isArray(qp['_sort'])) {qp['_sort'] = [qp['_sort']];}
   var sarr = qp['_sort'];
+  // Custom processing for "_sort"
   var order = sarr.map(function (sortp) {
     // Split to attribute, sort_direction
     var sortpair = sortp.split(/,/);
@@ -721,7 +732,7 @@ function probe_sort(req) { // OLD: , filter
     if (sortpair.length === 1) {sortpair.push(defdir);}
     // Conver to upper and validate
     else {
-      sortpair[1] = sortpair[1].toUpper();
+      sortpair[1] = sortpair[1].toUpperCase();
       if (!validdir[ sortpair[1] ]) {console.log("Invalid direction param "+sortpair[1]+" !");return null;}
     }
     return sortpair;
@@ -734,6 +745,34 @@ function probe_sort(req) { // OLD: , filter
   delete(qp['_sort']);
   return order;
 }
+
+// TODO: Consider sharing with probe_sort
+function probe_attr(req) {
+  console.log("Probe attrs !"+JSON.stringify(req.query));
+  var qp = req.query;
+  if (!qp) {return;} // No query !
+  if (!qp['_attrs']) {return;} // No attr parameter
+  // Coerce to array
+  if (!Array.isArray(qp['_attrs'])) {qp['_attrs'] = [qp['_attrs']];}
+  // TODO: Finish
+  elsif (qp['_attrs'][0].indexOf(",") > 0) { qp['_attrs'][0].split(","); } // TODO
+  var arr = qp['_attrs'];
+  // Validate to be all scalars (valid attr names)
+  var re = /^[a-zA-Z]\w+$/;
+  console.log("Apply regexp ("+arr+")");
+  // Could apply many policies here: silent ignore (all) _attrs, allow valid
+  // throw exception
+  var attrnotok = function (it) { return ( ((typeof it === 'string') && (it.match(re))) ? 0 : 1 ); };
+  var bad = arr.filter(attrnotok);
+  if (bad && bad.length) {
+    console.log("Attribute param(s) not valid:"+ bad);
+    delete(qp['_attrs']);
+    return;
+  }
+  delete(qp['_attrs']);
+  return arr;
+}
+
 /** Setup a good default router with default router URL:s.
  * Mainly used for the example app bundled in to module distribution.
  * For more granular routing setup do a similar reouter calls directly in your own app.
