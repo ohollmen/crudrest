@@ -755,7 +755,7 @@ function probe_attr(req) {
   // Coerce to array
   if (!Array.isArray(qp['_attrs'])) {qp['_attrs'] = [qp['_attrs']];}
   // TODO: Finish
-  elsif (qp['_attrs'][0].indexOf(",") > 0) { qp['_attrs'][0].split(","); } // TODO
+  else if (qp['_attrs'][0].indexOf(",") > 0) { qp['_attrs'][0].split(","); } // TODO
   var arr = qp['_attrs'];
   // Validate to be all scalars (valid attr names)
   var re = /^[a-zA-Z]\w+$/;
