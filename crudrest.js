@@ -261,7 +261,7 @@ function opt_or_ac (req, res) {
    })
    // TODO: sendcruderror()
    // .catch(function (ex) {jr.ok = 0;jr.msg = "Search error: "+ ex.message;res.send(jr);});
-   .catch(function (ex) {sendcruderror("Search error: ", ex, res);});
+   .catch(function (ex) {sendcruderror("Search error: ", ex, res); return; });
 }
 /** Internal method to send exception based Sequelize error messages to client.
  * Message is also replicated on server console.
@@ -328,7 +328,7 @@ function crudpost(req, res) {
     var d = respcb ? respcb(ent, "create") : ent;
     res.send(d);
   })
-  .catch(function (ex) {sendcruderror("Creation problem ",ex,res);});
+  .catch(function (ex) {sendcruderror("Creation problem ",ex,res); return; });
   // Multi-insert. NOTE: bulkCreate() will return null for auto-incrementing ID. Only attrs stored will
   // be returned to then callback (in Objects)
   function crudpostmulti(arr) {
@@ -390,16 +390,16 @@ function crudput (req, res) {
         var d = respcb ? respcb(ent, "update") : ent;
         res.send(d);
       })
-      .catch(function (ex) {sendcruderror("Updated ent reload failure",ex,res);});
+      .catch(function (ex) {sendcruderror("Updated ent reload failure",ex,res); return; });
       
       // end of re-fetch/then
     })
     // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
-    .catch(function (ex) {sendcruderror("Update failure",ex,res);});
+    .catch(function (ex) {sendcruderror("Update failure",ex,res); return; });
     // end of update/then
   })
   //.catch(function (ex) {jr.ok = 0;jr.msg = "No entry: " + ex.message;res.send(jr);})
-  .catch(function (ex) {sendcruderror("No entry for update",ex,res);});
+  .catch(function (ex) {sendcruderror("No entry for update",ex,res); return; });
    // end of find/then
 }
 
@@ -421,6 +421,9 @@ function crudput (req, res) {
  * - Above contions imply that entity types that do not have the "universal" soft-delete attribute in
  *   their sequelize model are hard deleted (no auto-soft-delete has chance to kick in because of
  *   missing attribute)
+ *
+ * ## Forcing hard-deletes (in softdelete mode)
+ * This is intentionally a hard-to-use configurable feature. Delete handler supports a (direct) property "_forceharddel" (named to not step on any existing properties) that must be set by node.js http / express middleware (this cannot be leaked into request accidentally from req.query or req.params). The middleware should do all the security checks for allowing hard delete and set req._forceharddel (possibly from incoming params or some other setting).
  */
 function cruddelete (req, res) {
   
@@ -443,19 +446,19 @@ function cruddelete (req, res) {
   // Need to check exists first ?
   // Need a flag for exception ?
   // Soft delete => UPDATE (need attr and value)
-  if (cropts.softdelattr && hasattribute(smodel, cropts.softdelattr)) { // smodel.hasAttr(sdattr)
+  if (cropts.softdelattr && hasattribute(smodel, cropts.softdelattr) && (!req._forceharddel)) { // smodel.hasAttr(sdattr)
     var softdel = cropts.softdeleted;
-    if (typeof softdel !== 'object') {sendcruderror("Soft delete not properly configured", null, res);}
-    console.log("Soft-delete mode: Use update setter", softdel);
+    if (typeof softdel !== 'object') {sendcruderror("Soft delete not properly configured", null, res); return; }
+    console.log("Soft-delete mode: Use update setter: ", softdel);
     smodel.update(softdel, idfilter)
     .then(function (num) {
        console.log("Sofdel (update) ret: ", num);
        var d = respcb ? respcb(jr, "delete") : jr;
        res.send(d);
     })
-    .catch(function (ex) {sendcruderror("Failed to SoftDelete", ex, res);});
+    .catch(function (ex) {sendcruderror("Failed to SoftDelete", ex, res); return; });
   }
-  // Real DELETE (non-soft)
+  // Real (Hard) DELETE (non-soft)
   else {
     smodel.destroy(idfilter)
     .then(function (num) {
