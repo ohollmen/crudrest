@@ -7,6 +7,8 @@
  * ### Running
  *     # Pass main config
  *     node crudrest.server.js /the/path/to/myapp.conf.js
+ *     # Pass main config and explicit Sequelize config
+ *     node crudrest.server.js --seqcfg /the/path/to/myenttypes.sequelize.js /the/path/to/myapp.conf.js
  *
  * ### Installing Dependencies
  *
@@ -69,6 +71,7 @@ var cfg = require(cfgname); // e.g. "./APPID.conf.json"
 var cfg = loadconfig(cfgname, "Main Config", {});
 
 var dbopts = cfg.dbconn;
+if (!dbopts) { console.log("Config must have member dbconn"); process.exit(1); }
 dbopts.dbname = dbopts.database; // sequelize compat.
 dbopts.username = dbopts.user;
 // Instantiate Sequelize with params given in config.
