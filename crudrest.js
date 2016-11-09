@@ -18,7 +18,7 @@ var perscache = {};
 var errcb = null;
 var respcb = null; // Custom response callback
 var taidx = {}; // TODO: Move
-// Examples of options
+// Examples of options (these are per application)
 var cropts = {
   softdelattr: '', // Universal soft-delete attribute
   softdeleted: null, // Softdeletion sequelize update (Object, e.g {active: 0})
@@ -439,6 +439,7 @@ function cruddelete (req, res) {
   //var whereid = {};
   //whereid[pka] = idval;
   //var idfilter = {where: whereid, limit: 1};
+  
   var idfilter = getidfilter(smodel, req);
   var byfilter = null; // Delete by attribute ...
   
@@ -667,7 +668,16 @@ function mixedbatchmod(req, res) {
   // TODO: Allow dry-run (for debugging) ?
   
   // Deletes: Bulk by where-filter with id:s
-  if (delids.length) { delfilter.where[pka] = delids;arr_prom.push(smodel.destroy(delfilter)); }
+  // TODO:
+  // - Reuse some of the crudrest delete functionality to avoid duplicating (relatively) complex logic for
+  //   soft-delets AND foreced hard delete ? What is the right amount of reuse ?
+  // - Allow soft delete (!) - the intial implementation ONLY did hard delete (despite "soft*" settings in cropts - see top of the file) - see above
+  // - Allow req._foreddel (also see above)
+  
+  if (delids.length) {
+    delfilter.where[pka] = delids; // Set WHERE IN filter for delete
+    arr_prom.push(smodel.destroy(delfilter));
+  }
   // Insert/Create: Do in Bulk
   if (arr_ins.length) {arr_prom.push(smodel.bulkCreate(arr_ins));}
   // Updates: need to be done individually. There is no bulk-update.
