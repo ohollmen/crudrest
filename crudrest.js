@@ -538,6 +538,8 @@ function crudgetsingle (req, res) {
  * ... Although most of the time you are likely to get the associated entries by their parent id:
  *
  *     $http.get("/products", {params: { parent: 34778} }).then(...)
+ *
+ * TODO: explain sorting feature in README.md
  */
 function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
