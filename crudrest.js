@@ -18,6 +18,8 @@ var perscache = {};
 var errcb = null;
 var respcb = null; // Custom response callback
 var taidx = {}; // TODO: Move
+var Promise = require('bluebird');
+
 // Examples of options (these are per application)
 var cropts = {
   softdelattr: '', // Universal soft-delete attribute
@@ -278,8 +280,8 @@ function sendcruderror(basemsg, ex, res) {
    // Set error with base message.
    var jr = {"ok": 0, "msg": basemsg };
    // TODO: Make ex.message optional If (debug) {...}
-   jr.msg += ": " + ex ? ex.message : "(No exceptions)";
-   // Intercept / transform by 
+   jr.msg += ": " + (ex ? ex.message : "(No exceptions)");
+   // Intercept / transform by
    //if (errcb) {jr = errcb(..., r.msg);} // TODO
    res.send(jr);
    console.log(jr.msg);
@@ -403,15 +405,51 @@ function crudput (req, res) {
    // end of find/then
 }
 
+/**
+ *
+ * Wrapper of deletetion which encapsulates hard/soft delete
+ *
+ * @param {object}  smodel - Sequelize model (for a entity type)
+ * @param {object} filter - Sequelize filter to destroy (hard delete) or update (soft delete)
+ * @param {int} forceharddel - if true call destroy Sequelize method
+ * @returns {Promise.<int>} - number of affecteds row
+ * @private
+ */
+function _cruddelete(smodel, filter, forceharddel) {
+
+  return new Promise(function(resolve, reject) {
+    // var cropts = opts();
+    // Need to check exists first ?
+    // Need a flag for exception ?
+    // Soft delete => UPDATE (need attr and value)
+    if (cropts.softdelattr && hasattribute(smodel, cropts.softdelattr) && (!forceharddel)) { // smodel.hasAttr(sdattr)
+      var softdel = cropts.softdeleted;
+
+      if (typeof softdel !== 'object') { var error = new Error(); error.basemsg = "Soft delete not properly configured"; return reject(error); }
+      console.log("Soft-delete mode: Use update setter: ", softdel);
+      smodel.update(softdel, filter) //Promise.<Array.<affectedCount>>
+        .then(function (num) { if (num && num.length) { num = num[0]; }  console.log("Sofdel (update) ret: ", num); resolve(num); })
+        .catch(function (ex) { ex.basemsg = "Failed to SoftDelete"; reject(ex); } );
+    }
+    // Real (Hard) DELETE (non-soft)
+    else {
+      smodel.destroy(filter)
+        .then(function (num) { console.log("Deleted (count): " + num); resolve(num); })
+        .catch(function (ex) { ex.basemsg = "Failed to Delete:"; reject(ex); });
+    }
+  })
+}
+
+
 /** Delete single entry of a type by id by HTTP DELETE.
  * Route pattern must have params: ":type", ":idval"
  *
- * 
- * 
+ *
+ *
  *     var crudrest = require('crudrest');
  *     // ...
  *     router.delete("/:type/:idval", crudrest.cruddelete);
- * 
+ *
  * ## Automatic soft-delete
  *
  * Automatic soft-delete is triggered when following conditions are met:
@@ -442,38 +480,23 @@ function cruddelete (req, res) {
   
   var idfilter = getidfilter(smodel, req);
   var byfilter = null; // Delete by attribute ...
-  
-  // var cropts = opts();
-  // Need to check exists first ?
-  // Need a flag for exception ?
-  // Soft delete => UPDATE (need attr and value)
-  if (cropts.softdelattr && hasattribute(smodel, cropts.softdelattr) && (!req._forceharddel)) { // smodel.hasAttr(sdattr)
-    var softdel = cropts.softdeleted;
-    if (typeof softdel !== 'object') {sendcruderror("Soft delete not properly configured", null, res); return; }
-    console.log("Soft-delete mode: Use update setter: ", softdel);
-    smodel.update(softdel, idfilter)
-    .then(function (num) {
-       console.log("Sofdel (update) ret: ", num);
-       var d = respcb ? respcb(jr, "delete") : jr;
-       res.send(d);
-    })
-    .catch(function (ex) {sendcruderror("Failed to SoftDelete", ex, res); return; });
-  }
-  // Real (Hard) DELETE (non-soft)
-  else {
-    smodel.destroy(idfilter)
-    .then(function (num) {
-      jr.ok = num;
+
+  _cruddelete(smodel, idfilter, req._forceharddel).then( function (num) {
+
+    jr.ok = num;
+    if (!num) {
+      jr.msg = "No such entry: " + idval;
+    } else {
       jr.idval = idval;
-      if (!num) {jr.msg = "No such entry: " + idval;}
-      console.log("Deleted (count): " + num);
-      // if (!num) {return;} // Earlier exception
-      var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
-      res.send(d);
-    })
-    // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
-    .catch(function (ex) {sendcruderror("Failed to Delete:",ex,res);});
-  }
+    };
+
+    console.log("Deleted (count): " + num);
+    // if (!num) {return;} // Earlier exception
+    var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
+    res.send(d);
+  }, function(err) {
+    sendcruderror(err.basemsg, err, res);
+  });
 }
 
 // 2 cases for GET
@@ -668,15 +691,16 @@ function mixedbatchmod(req, res) {
   // TODO: Allow dry-run (for debugging) ?
   
   // Deletes: Bulk by where-filter with id:s
-  // TODO:
+  // TODO: DONE reusing _cruddelete function
   // - Reuse some of the crudrest delete functionality to avoid duplicating (relatively) complex logic for
   //   soft-delets AND foreced hard delete ? What is the right amount of reuse ?
   // - Allow soft delete (!) - the intial implementation ONLY did hard delete (despite "soft*" settings in cropts - see top of the file) - see above
-  // - Allow req._foreddel (also see above)
-  
+  // - Allow req._forceharddel (also see above)
+
   if (delids.length) {
     delfilter.where[pka] = delids; // Set WHERE IN filter for delete
-    arr_prom.push(smodel.destroy(delfilter));
+    // arr_prom.push(smodel.destroy(delfilter));
+    arr_prom.push(_cruddelete(smodel, delfilter, req._forceharddel));
   }
   // Insert/Create: Do in Bulk
   if (arr_ins.length) {arr_prom.push(smodel.bulkCreate(arr_ins));}
