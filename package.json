@@ -19,7 +19,8 @@
     "eslint" : "~0.23.0",
     "mysql" : "~2.7.0",
     "sqlite3" : "~3.0.8",
-    "node-getopt": "~0.2.3"
+    "node-getopt": "~0.2.3",
+    "bluebird": "^3.0.0"
   },
   "keywords": [
     "CRUD",
