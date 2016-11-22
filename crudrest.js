@@ -27,7 +27,8 @@ var cropts = {
   softactive: null, // Soft delete active state (not deleted) as sequelize filter (Object, e.g. {where: {active {"ne": 0}}
   mixeddelprop: null, // "isDeleted" property for mixed C,U,D processing, denoting deletion
   debug: 0, // TODO: Start using debug flag across the module
-  incmap: null
+  incmap: null,
+  otypetrans: {} // Object type transformations: mapping of otype to transformation CB
 };
 /** Internal static method to create ID based filter for Sequelize CRUD Operations.
  * The crudrest module convention requires to have parameter ":idval"
@@ -128,6 +129,34 @@ function setrespcb (cb) {
    // Must be function
    if (typeof(cb) != "function") {return;}
    respcb = cb;
+}
+/** Set entity type per-entry transformation.
+* This needs to be called for every entity type that needs to have transformation.
+* Can be applied for collections by calling individually per each item.
+* @param {string} otype - Entity type name (e.g. "users")
+* @param {function} cb - Transformation callback (with signature: ent, req
+*
+* Callback can do any transformations on the entry: add fields, delete fields, modify fields, etc. Callback is called on:
+* - retrieving single entry
+* - retrieving multiple entry
+* - response to update
+* The callback should have a signature (see also example below):
+* - ent - Entry
+* - req - Current (Node.js HTTP / Express) HTTP
+* As usual signature is not checked.
+* Example:
+*    // Simple add attribute
+*    function addfullname(ent) {ent.fullname = ent.firstname + " " + ent.lastname; }
+*    crudrest.addotypetrans("users", addfullname);
+*    // Bit more advanced, combine addition and deletion
+*    function deletepassinfo(ent) { delete(ent.passwd); delete(ent.passtype); }
+*    crudrest.addotypetrans("users", function (ent) { addfullname(ent); deletepassinfo(ent); });
+*
+* Currently the transformation is required to run syncronously and does not return any value.
+* These trans callback assignments are also exclusive (non-cumulative), i.e. later assignment overrides and cancels earlier.
+*/
+function addotypetrans(otype, cb) {
+   cropts.otypetrans[otype] = cb;
 }
 // Set or get crudrest package options
 function opts(cropts_p) {
@@ -327,8 +356,9 @@ function crudpost(req, res) {
   .then(function (ent) {
     if (!ent) {console.log("Likely earlier exception");return;} // Earlier exception
     console.log("Saved(OK): " + JSON.stringify(ent));
-    var d = respcb ? respcb(ent, "create") : ent;
-    res.send(d);
+    if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); }
+    var rd = respcb ? respcb(ent, "create") : ent;
+    res.send(rd);
   })
   .catch(function (ex) {sendcruderror("Creation problem ",ex,res); return; });
   // Multi-insert. NOTE: bulkCreate() will return null for auto-incrementing ID. Only attrs stored will
@@ -341,9 +371,12 @@ function crudpost(req, res) {
     console.log("opts:", opts);
     smodel.bulkCreate(arr, opts)
     .then(function (ent) {
-      if (!ent) {console.log("Likely earlier exception (case-multi)");return;}
-      var d = respcb ? respcb(ent, "create") : ent;
-      res.send(d);
+      if (!ent) { console.log("Likely earlier exception (case-multi)");return; }
+      // TODO: What is ent here (as passed by Sequelize) ? Array ?
+      // Need to do: ents.forEach(function (ent) { cropts.otypetrans[otype](ent, req); } ); ???
+      // if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); } // Unlikely
+      var rd = respcb ? respcb(ent, "create") : ent;
+      res.send(rd);
     })
     .catch(function (ex) {sendcruderror("Multi-Creation problem ",ex,res);});
   }
@@ -378,19 +411,17 @@ function crudput (req, res) {
     if (!ent) {var msg = "No entry for update";console.log(msg);sendcruderror(msg,new Error("No entry by id:"+idval),res);return;}
     console.log("Seems to exist for update): " + idval);
     smodel.update(req.body, idfilter) // options.limit (mysql)
-    // Alternative method (~2012)
-    // ent.updateAttributes(req.body).success(...)
-    
-    // This seems to gain: [1]
+    // Alternative method (Sequelize ~2012): ent.updateAttributes(req.body).success(...)
+    // This seems to gain: [1]. Need to run find()
     .then(function (ent) {
       if (!ent) {console.log("PUT: Exception ?");return;} // Earlier exception
       // Need to find again ? Need to reconfig idfilter ?
       smodel.find(idfilter)
-      
       .then(function (ent) {
         console.log("Updated: ", ent);
-        var d = respcb ? respcb(ent, "update") : ent;
-        res.send(d);
+	if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); }
+        var rd = respcb ? respcb(ent, "update") : ent;
+        res.send(rd);
       })
       .catch(function (ex) {sendcruderror("Updated ent reload failure",ex,res); return; });
       
@@ -428,16 +459,16 @@ function _cruddelete(smodel, filter, forceharddel) {
       if (typeof softdel !== 'object') { var error = new Error(); error.basemsg = "Soft delete not properly configured"; return reject(error); }
       console.log("Soft-delete mode: Use update setter: ", softdel);
       smodel.update(softdel, filter) //Promise.<Array.<affectedCount>>
-        .then(function (num) { if (num && num.length) { num = num[0]; }  console.log("Sofdel (update) ret: ", num); resolve(num); })
-        .catch(function (ex) { ex.basemsg = "Failed to SoftDelete"; reject(ex); } );
+      .then(function (num) { if (num && num.length) { num = num[0]; }  console.log("Sofdel (update) ret: ", num); resolve(num); })
+      .catch(function (ex) { ex.basemsg = "Failed to SoftDelete"; reject(ex); } );
     }
     // Real (Hard) DELETE (non-soft)
     else {
       smodel.destroy(filter)
-        .then(function (num) { console.log("Deleted (count): " + num); resolve(num); })
-        .catch(function (ex) { ex.basemsg = "Failed to Delete:"; reject(ex); });
+      .then(function (num) { console.log("Deleted (count): " + num); resolve(num); })
+      .catch(function (ex) { ex.basemsg = "Failed to Delete:"; reject(ex); });
     }
-  })
+  });
 }
 
 
@@ -480,23 +511,18 @@ function cruddelete (req, res) {
   
   var idfilter = getidfilter(smodel, req);
   var byfilter = null; // Delete by attribute ...
-
+  // 
   _cruddelete(smodel, idfilter, req._forceharddel).then( function (num) {
 
     jr.ok = num;
-    if (!num) {
-      jr.msg = "No such entry: " + idval;
-    } else {
-      jr.idval = idval;
-    };
-
+    if (!num) { jr.msg = "No such entry: " + idval; }
+    else      { jr.idval = idval; }
     console.log("Deleted (count): " + num);
     // if (!num) {return;} // Earlier exception
     var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
     res.send(d);
-  }, function(err) {
-    sendcruderror(err.basemsg, err, res);
-  });
+  },
+  function(err) { sendcruderror(err.basemsg, err, res); });
 }
 
 // 2 cases for GET
@@ -524,9 +550,10 @@ function crudgetsingle (req, res) {
   smodel.find(idfilter)
   .then(function (ent) {
     if (!ent) { sendcruderror("No Entry Found!",new Error(" id:" + req.params.idval), res);return; } // Earlier exception or ent == null
-    console.log("Got single(by:"+req.params.idval+"): " + JSON.stringify(ent));
-    var d = respcb ? respcb(ent, "retrieve") : ent; // FIXME: ent may be null
-    res.send(d);
+    console.log("Got single(by:"+req.params.idval+"): " + JSON.stringify(ent) );
+    if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); }
+    var rd = respcb ? respcb(ent, "retrieve") : ent; // FIXME: ent may be null (should not be by now, see above check)
+    res.send(rd);
   })
   .catch(function (ex) {sendcruderror("No Entry Found",ex,res);});
 }
@@ -615,8 +642,11 @@ function crudgetmulti (req, res)  {
   .then(function (arr) {
     // if (!arr) {jr.msg = "No result set array !"; res.send(jr);}
     console.log("Got multiple: " + arr.length + " ents.");
-    var d = respcb ? respcb(arr, "retrieve") : arr;
-    res.send(d);
+    if (cropts.otypetrans[otype]) {
+      arr.forEach(function (ent) { cropts.otypetrans[otype](ent, req); }  );
+    }
+    var rd = respcb ? respcb(arr, "retrieve") : arr;
+    res.send(rd);
   })
   // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
   .catch(function (ex) {sendcruderror("No Entries Found.",ex,res);});
@@ -726,9 +756,9 @@ function mixedbatchmod(req, res) {
     if (err) {sendcruderror("Failed mixed C,U,D processing (via promises)", null, res);return;}
     jr.stats = {up: arr_up.length, ins: arr_ins.length, del: delids.length};
     
-    var d = respcb ? respcb(jr, "mixedop") : jr;
+    var rd = respcb ? respcb(jr, "mixedop") : jr;
     // TODO: Return modification statistics
-    res.send(d);
+    res.send(rd);
   });
   
   
@@ -736,7 +766,7 @@ function mixedbatchmod(req, res) {
 
 /** Add Sort/Order components from request parameters to Sequelize filter (if any).
  * Has a side effect of removing all Sort/Order query parameters from request (req) to not
- * treat them as where filter components later.
+ * treat them as WHERE filter components later.
  * Sort/Order components are picked up from query parameter "_sort" with following options
  * - value should be attr name with optional direction parameter separated by comma (e.g. ...&_sort=age,DESC&...)
  * - If direction parameter is missing, 'ASC' is used
@@ -779,7 +809,7 @@ function probe_sort(req) { // OLD: , filter
   // Add Sequelize "order" param to filter to use in later query.
   // OLD: filter.order = order.filter(function (it) {return it;}); // Strip null:s
   // NEW: sort definition is returned as a structure to be embedded by caller (!)
-  order = order.filter(function (it) {return it;}); // OLD: var odder (dup decl)
+  order = order.filter( function (it) {return it;} ); // OLD: var order (dup decl)
   // Get rid of '_sort'
   delete(qp['_sort']);
   return order;
