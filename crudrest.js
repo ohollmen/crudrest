@@ -356,7 +356,7 @@ function crudpost(req, res) {
   .then(function (ent) {
     if (!ent) {console.log("Likely earlier exception");return;} // Earlier exception
     console.log("Saved(OK): " + JSON.stringify(ent));
-    if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); }
+    if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
     var rd = respcb ? respcb(ent, "create") : ent;
     res.send(rd);
   })
@@ -372,7 +372,7 @@ function crudpost(req, res) {
     smodel.bulkCreate(arr, opts)
     .then(function (ent) {
       if (!ent) { console.log("Likely earlier exception (case-multi)");return; }
-      // TODO: What is ent here (as passed by Sequelize) ? Array ?
+      // TODO: What is ent here (as passed by Sequelize) ? Array ? count ?
       // Need to do: ents.forEach(function (ent) { cropts.otypetrans[otype](ent, req); } ); ???
       // if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); } // Unlikely
       var rd = respcb ? respcb(ent, "create") : ent;
@@ -419,7 +419,7 @@ function crudput (req, res) {
       smodel.find(idfilter)
       .then(function (ent) {
         console.log("Updated: ", ent);
-	if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); }
+	if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
         var rd = respcb ? respcb(ent, "update") : ent;
         res.send(rd);
       })
@@ -551,7 +551,7 @@ function crudgetsingle (req, res) {
   .then(function (ent) {
     if (!ent) { sendcruderror("No Entry Found!",new Error(" id:" + req.params.idval), res);return; } // Earlier exception or ent == null
     console.log("Got single(by:"+req.params.idval+"): " + JSON.stringify(ent) );
-    if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); }
+    if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
     var rd = respcb ? respcb(ent, "retrieve") : ent; // FIXME: ent may be null (should not be by now, see above check)
     res.send(rd);
   })
@@ -643,7 +643,8 @@ function crudgetmulti (req, res)  {
     // if (!arr) {jr.msg = "No result set array !"; res.send(jr);}
     console.log("Got multiple: " + arr.length + " ents.");
     if (cropts.otypetrans[otype]) {
-      arr.forEach(function (ent) { cropts.otypetrans[otype](ent, req); }  );
+      // ent.get() is equivalent of ent.dataValues
+      arr.forEach(function (ent) { cropts.otypetrans[otype](ent.get(), req); }  );
     }
     var rd = respcb ? respcb(arr, "retrieve") : arr;
     res.send(rd);
