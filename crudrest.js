@@ -921,5 +921,5 @@ module.exports.setrespcb = setrespcb;
 module.exports.seterrhdlr = seterrhdlr;
 module.exports.settaidx = settaidx;
 module.exports.opts = opts;
-
+module.exports.addotypetrans = addotypetrans;
 

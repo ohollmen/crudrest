@@ -3,8 +3,13 @@
 'use strict';
 /** @file
  * ## Simple example Crud Rest application
+ * 
+ * Provides CRUD REST Services for entity types configured in server config file.
+ * Note: this should be only used for testing as there is no default security implemented by this example server.
  *
  * ### Running
+ * 
+ * Examples of running the test server.
  *     # Pass main config
  *     node crudrest.server.js /the/path/to/myapp.conf.js
  *     # Pass main config and explicit Sequelize config
@@ -12,11 +17,14 @@
  *
  * ### Installing Dependencies
  *
- * Individually / Globally
- *     # Remember to set NODE_PATH (e.g. export NODE_PATH=/usr/local/lib/node_modules)
- *     sudo npm install -g express sequelize async
- *     sudo npm install -g sqlite3 mysql
- * npm should install dependencies automatically based on the bundled package.json.
+ * By package.json / Individually:
+ *
+ *     # By bundled local package.json
+ *     npm install
+ *     # Individually (add -g for global install)
+ *     sudo npm install express sequelize async bluebird node-getopt
+ *     sudo npm install sqlite3 mysql
+ *
  *
  * ### Configuration
  *
@@ -59,19 +67,19 @@ var seqpath = process.env['SEQ_PATH'];
 if (process.argv.length < 3) {throw "Need at least one arg (mainconfig)!"; }
 //OLD: var cfgname = process.argv[2];
 var cfgname = process.argv.pop(); // Last arg
-if (!cfgname) {console.log("Pass Main Config name (as first arg) on the command line");process.exit(0);}
+if (!cfgname) { console.log("Pass Main Config name (as last arg) on the command line");process.exit(0); }
 console.log(opt);
 
 if (0) {
-var cfgok = fs.existsSync(cfgname);
-if (!cfgok) {console.log("Main Config ("+cfgname+") not there");process.exit(0);}
-// Allow anything that require() can use (.js or .json)
-var cfg = require(cfgname); // e.g. "./APPID.conf.json"
+  var cfgok = fs.existsSync(cfgname);
+  if (!cfgok) {console.log("Main Config ("+cfgname+") not there");process.exit(0);}
+  // Allow anything that require() can use (.js or .json)
+  var cfg = require(cfgname); // e.g. "./APPID.conf.json"
 }
 var cfg = loadconfig(cfgname, "Main Config", {});
 
 var dbopts = cfg.dbconn;
-if (!dbopts) { console.log("Config must have member dbconn"); process.exit(1); }
+if (!dbopts) { console.log("Config must have member 'dbconn' to describe DB connectivity"); process.exit(1); }
 dbopts.dbname = dbopts.database; // sequelize compat.
 dbopts.username = dbopts.user;
 // Instantiate Sequelize with params given in config.
