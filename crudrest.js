@@ -110,7 +110,7 @@ function getpersister (otype, res) {
      // jerr.msg += "Type:" + otype + ". Total types:" + Object.keys(perscache).length;
      
    //}
-   res.send(jerr); // TODO: NOT Here ? See/Analyze error handling above
+   // res.send(jerr); // TODO: NOT Here ? See/Analyze error handling above
    console.log("Invalid entity type requested: " + otype);
    return null;
 }
