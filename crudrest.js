@@ -105,11 +105,11 @@ function getpersister (otype, res) {
    sendcruderror(emsg, null, res);
    // General / default error message generation (Use errcb) to
    // override.
-   else {
+   //else {
      
      // jerr.msg += "Type:" + otype + ". Total types:" + Object.keys(perscache).length;
      
-   }
+   //}
    res.send(jerr); // TODO: NOT Here ? See/Analyze error handling above
    console.log("Invalid entity type requested: " + otype);
    return null;
