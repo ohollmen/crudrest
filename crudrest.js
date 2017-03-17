@@ -100,8 +100,9 @@ function getpersister (otype, res) {
    // Invalid persister, custom error handling. Ensure request is ended.
    var emsg = "Not a valid entity type."; // Keep high level.
    var jerr = {"ok" : 0, "msg": emsg};
-   // Override jerr ?
-   if (errcb) { jerr = errcb(otype, emsg); }
+   // Override jerr ? TODO: Use sendcruderror();
+   // if (errcb) { jerr = errcb(otype, emsg); }
+   sendcruderror(emsg, null, res);
    // General / default error message generation (Use errcb) to
    // override.
    else {
@@ -311,7 +312,8 @@ function sendcruderror(basemsg, ex, res) {
    // TODO: Make ex.message optional If (debug) {...}
    jr.msg += ": " + (ex ? ex.message : "(No exceptions)");
    // Intercept / transform by
-   //if (errcb) {jr = errcb(..., r.msg);} // TODO
+   // TODO: Need more context to have otype (1st param)
+   if (errcb) {jr = errcb("unknown_type", jr.msg);} // TODO
    res.send(jr);
    console.log(jr.msg);
 }
@@ -591,6 +593,7 @@ function crudgetsingle (req, res) {
  *     $http.get("/products", {params: { parent: 34778} }).then(...)
  *
  * TODO: explain sorting feature in README.md
+ * TODO: Add support for _limit (Sequelize: ...)
  */
 function crudgetmulti (req, res)  {
   // var otype = req.params[0]; // OLD !
