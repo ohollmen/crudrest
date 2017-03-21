@@ -10,10 +10,10 @@
 */
 'use strict;';
 // Note: During dev. install locally: sudo npm install -g
-
-var express = require('express');
+// NEW: Remove any unnecessary coupling to express. It's weird it was here even if it was unused.
+// var express = require('express');
+// var router = express.Router({caseSensitive: 1});
 var async   = require('async'); // For mixed C,U,D processing.
-var router = express.Router({caseSensitive: 1});
 var perscache = {};
 var errcb = null;
 var respcb = null; // Custom response callback
@@ -861,7 +861,8 @@ function probe_attr(req) {
  *     // app.use('/specialpath', router);
  */
 function defaultrouter(router) {
-   if ( ! router) {  router = express.Router({caseSensitive: 1}); }
+   // OLD: if ( ! router) {  router = express.Router({caseSensitive: 1}); }
+   if ( ! router) {  throw "defaultrouter: Must pass router for CRUDREST routing !"; }
    // function dummy (req, res) {}
    
    // Options or AC (Based on this pattern must be early)
@@ -884,7 +885,9 @@ function defaultrouter(router) {
 //Example: module.exports = router;
 // TODO: MUST Store other things here too.
 // module.exports.perscache = {};
-module.exports.router = router; // ????
+// NEW: This is too weird (why was this here ever ?). Eliminated (2017-03).
+// module.exports.router = router; // ????
+
 /** Set Sequelize ORM/persister config.
  * Persister cache should be pre-indexed as described by documentation main page.
  * 
@@ -909,9 +912,12 @@ function setperscache (pc, sequelize) {
  */
 function settaidx(pc) {taidx = pc;}
 
+// module.exports = {
 // Helper methods
 module.exports.setperscache = setperscache;
 module.exports.defaultrouter = defaultrouter;
+module.exports.getpersister = getpersister; // NEW export
+module.exports.hasattribute = hasattribute; // NEW export
 // Assign Main Handler methods: crudpost crudput cruddelete crudgetsingle crudgetmulti
 module.exports.crudpost = crudpost;
 module.exports.crudput = crudput;
@@ -927,3 +933,4 @@ module.exports.settaidx = settaidx;
 module.exports.opts = opts;
 module.exports.addotypetrans = addotypetrans;
 
+//};
