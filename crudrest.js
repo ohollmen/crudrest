@@ -421,7 +421,7 @@ function crudput (req, res) {
     // TODO: Allow a synchronous callback for checking authority to update
     // TODO: Change interface so that callback can return an additional message (consider exception
     // as we are running in a promise context that should be able to catch)
-    if (req.crudupcheck && (typeof req.crudupcheck == "function")) {
+    if (req.crudupdateok && (typeof req.crudupdateok == "function")) {
       var ok = req.crudupdateok(ent.get(), req); // entry, req
       if (!ok) { sendcruderror("Not authorized for update", null, res);return; }
     }
@@ -433,7 +433,7 @@ function crudput (req, res) {
       // Need to find again ? Need to reconfig idfilter ?
       smodel.find(idfilter)
       .then(function (ent) {
-        console.log("Updated: ", ent);
+        console.log("Updated: ", ent.get());
 	if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
         var rd = respcb ? respcb(ent, "update") : ent;
         res.send(rd);
