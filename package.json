@@ -11,12 +11,12 @@
     "url": "https://github.com/ohollmen/crudrest.git"
   },
   "dependencies": {
-    "express": "~4.12.4",
     "sequelize":"3.2.0",
     "async": "1.5.2",
     "bluebird": "^3.0.0"
   },
   "devDependencies": {
+    "express": "~4.12.4",
     "eslint" : "~0.23.0",
     "mysql" : "~2.7.0",
     "sqlite3" : "~3.0.8",
