@@ -418,11 +418,13 @@ function crudput (req, res) {
   .then(function (ent) {
     if (!ent) {var msg = "No entry for update";console.log(msg);sendcruderror(msg,new Error("No entry by id:"+idval),res);return;}
     console.log("Seems to exist for update: " + idval);
-    // TODO: Allow a synchronous callback for checking authority to update
+    // Allow a synchronous callback for checking authority to update
+    // NOTE: This undocumented feature and interface is "in flux" and subject to change
     // TODO: Change interface so that callback can return an additional message (consider exception
     // as we are running in a promise context that should be able to catch)
+    // TODO: Pass incoming vals as 2nd param ?
     if (req.crudupdateok && (typeof req.crudupdateok == "function")) {
-      var ok = req.crudupdateok(ent.get(), req); // entry, req
+      var ok = req.crudupdateok(ent.get(), req.body, req); // entry, req TODO: oldent, update, req
       if (!ok) { sendcruderror("Not authorized for update", null, res);return; }
     }
     smodel.update(req.body, idfilter) // options.limit (mysql)
