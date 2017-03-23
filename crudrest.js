@@ -174,26 +174,32 @@ function hasattribute (model, attr) {
    if (model.tableAttributes[attr]) {return 1;}
    return 0;
 }
-/*
+/* Internal / Unofficial / Experimental helper method to allow (GET) loading composite structures.
+* Applicable for getting single / multiple entries.
+* Sends crud error response as a side effect.
 * 
-* @param req - Request with optional :inc route parameter (for inclusion profile label from route URL)
-* @param filter - Sequelize find (findAll,findOne) filter parameter to add inclusion to.
+* @param {object} req - Request with optional :inc route parameter (for inclusion profile label from route URL)
+* @param {object} filter - Sequelize find (findAll,findOne) filter parameter to add inclusion to.
 * @return number of entry inclusions or -1 for error (ambiguous inclusion). Add inclusions to filter.
-* @todo Weed out err comm from here to have more caller flexibility. Throw errors ?
+* @todo Weed out automatic err resp. from here to have more caller flexibility. Throw errors ?
 */
 function addfindinclusions (req, resp, filter) {
   var inclbl = req.params['inc'];
   if (!inclbl) { return 0; } // No Inclusions
+  if (!filter) { sendcruderror("No filter passed", null, resp); return -1; }
+  if (typeof filter != "object") { sendcruderror("Filter must be an object", null, resp); return -1; }
   // Mandate inclbl to be in dot-not ?
   // var m = inclbl.match(/^(\w+)\.(\w+)$/);
   // if (!m) { sendcruderror("Inclusion label not in correct format", null, resp); return -1; }
   var incmap = cropts[incmap];
-  if (!incmap) { sendcruderror("No Inclusion map", null, resp); return -1; }
+  if (!incmap) { sendcruderror("No Inclusion map gotten", null, resp); return -1; }
   var inc = incmap[inclbl]; // Array (as dictated by Sequelize). 
   if (!Array.isArray(inc)) { sendcruderror("Inclusion map not in array!", null, resp); return -1; }
   // TODO: Check type from inclbl (in t.prof dot-notation ?) ? OR ... trust passed inc ?
-  // 
-  idfilter.include = inc; // Add find-include
+  // Based on empiric evidence Sequelize does *something* to include definition that makes it non-usable
+  // for sub-sequent calls. Make a deep copy of original include definition to not allow sequelize corrupt it.
+  inc = JSON.parse(JSON.stringify(inc));
+  idfilter.include = inc; // Add find-include to filter
   return(inc.length);
 }
 
@@ -314,7 +320,7 @@ function sendcruderror(basemsg, ex, res) {
    // Intercept / transform by
    // TODO: Need more context to have otype (1st param)
    if (errcb) {jr = errcb("unknown_type", jr.msg);} // TODO
-   res.send(jr);
+   res.json(jr);
    console.log(jr.msg);
 }
 /* ************************* CRUD ************************** */
@@ -404,14 +410,21 @@ function crudput (req, res) {
   if (!smodel) {return;}
   //var idfilter = {where: whereid, limit: 1};
   var idfilter = getidfilter(smodel, req);
-  console.log("PUT: Update Triggered on " + idval);
+  console.log("PUT: Update Triggered on " + otype + ":" + idval);
   console.log(req.body);
   // Need to find entry first (share id filter with update)
   smodel.find(idfilter)
   
   .then(function (ent) {
     if (!ent) {var msg = "No entry for update";console.log(msg);sendcruderror(msg,new Error("No entry by id:"+idval),res);return;}
-    console.log("Seems to exist for update): " + idval);
+    console.log("Seems to exist for update: " + idval);
+    // TODO: Allow a synchronous callback for checking authority to update
+    // TODO: Change interface so that callback can return an additional message (consider exception
+    // as we are running in a promise context that should be able to catch)
+    if (req.crudupcheck && (typeof req.crudupcheck == "function")) {
+      var ok = req.crudupdateok(ent.get(), req); // entry, req
+      if (!ok) { sendcruderror("Not authorized for update", null, res);return; }
+    }
     smodel.update(req.body, idfilter) // options.limit (mysql)
     // Alternative method (Sequelize ~2012): ent.updateAttributes(req.body).success(...)
     // This seems to gain: [1]. Need to run find()
