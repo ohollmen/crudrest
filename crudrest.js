@@ -412,6 +412,8 @@ function crudput (req, res) {
   var idfilter = getidfilter(smodel, req);
   console.log("PUT: Update Triggered on " + otype + ":" + idval);
   console.log(req.body);
+  // Note: Update by ID (from params) with and Array does not makse sense. catch this case here
+  if (Array.isArray(req.body)) { sendcruderror("Cannot update (PUT) multiple by ID",null,res); return; }
   // Need to find entry first (share id filter with update)
   smodel.find(idfilter)
   
