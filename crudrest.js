@@ -14,8 +14,8 @@
 // var express = require('express');
 // var router = express.Router({caseSensitive: 1});
 var async   = require('async'); // For mixed C,U,D processing.
-var perscache = {};
-var errcb = null;
+var perscache = {};// Perister cache to be populated or directly set (by setperscache()).
+var errcb = null;  // Custom error-case callback
 var respcb = null; // Custom response callback
 var taidx = {}; // TODO: Move
 var Promise = require('bluebird');
@@ -199,7 +199,7 @@ function addfindinclusions (req, resp, filter) {
   // Based on empiric evidence Sequelize does *something* to include definition that makes it non-usable
   // for sub-sequent calls. Make a deep copy of original include definition to not allow sequelize corrupt it.
   inc = JSON.parse(JSON.stringify(inc));
-  idfilter.include = inc; // Add find-include to filter
+  filter.include = inc; // Add find-include to filter
   return(inc.length);
 }
 
@@ -319,9 +319,19 @@ function sendcruderror(basemsg, ex, res) {
    jr.msg += ": " + (ex ? ex.message : "(No exceptions)");
    // Intercept / transform by
    // TODO: Need more context to have otype (1st param)
-   if (errcb) {jr = errcb("unknown_type", jr.msg);} // TODO
+   // NEW: Added ex to be passed (to be able to extract details in custom handler)
+   // As such, jr.msg becomes somewhat redudnant (although not completely)
+   if (errcb) {jr = errcb("unknown_type", jr.msg, ex);} // TODO
    res.json(jr);
    console.log(jr.msg);
+}
+/** TODO: Take this into use instead of low level response handling in each CRUD Handler (similar to sendcruderror)
+* Use (globally set) respcb (set by setrespcb()) to formulate message if set
+*/
+function sendcrudresp(ent_or_rdata, operlbl) {
+  var jr = ent_or_rdata;
+  // if (respcb) { jr = respcb(ent_or_data, operlbl); }
+  //res.json(jr);
 }
 /* ************************* CRUD ************************** */
 
