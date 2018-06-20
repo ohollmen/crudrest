@@ -2,8 +2,11 @@
 
 /* @file
 * All JSDoc "Home" content moved to README.md
-* @todo Make logging to console be optional / supressible.
-*
+* @todo Make logging to console be optional / supressible (See cropts.debug).
+* @todo Create a crudopctx to pass to various CB:s (instead of passing a long list of parameters). Should have otype,idval,oplbl,req,res ...
+* and should be used as minimum for sendcruderror and sendcrudresp ...
+*  
+* 
 * # Developer geared info
 * - Primary key for smodel is available in smodel.primaryKeyAttribute
 * - Sequelize Docs: http://docs.sequelizejs.com/en/latest/
@@ -15,21 +18,54 @@
 // var router = express.Router({caseSensitive: 1});
 var async   = require('async'); // For mixed C,U,D processing.
 var perscache = {};// Perister cache to be populated or directly set (by setperscache()).
+// TODO: As these 2 cb:s are optional - place to cropts below ?
 var errcb = null;  // Custom error-case callback
 var respcb = null; // Custom response callback
-var taidx = {}; // TODO: Move
+var taidx = {}; // TODO: Move. related to autocomplete.
 var Promise = require('bluebird');
 
 // Examples of options (these are per application)
 var cropts = {
-  softdelattr: '', // Universal soft-delete attribute
+  softdelattr: '', // Universal soft-delete attribute (must be string)
   softdeleted: null, // Softdeletion sequelize update (Object, e.g {active: 0})
   softactive: null, // Soft delete active state (not deleted) as sequelize filter (Object, e.g. {where: {active {"ne": 0}}
-  mixeddelprop: null, // "isDeleted" property for mixed C,U,D processing, denoting deletion
+  mixeddelprop: null, // "isDeleted" property for mixed C,U,D processing, denoting deletion. Must be same application-wide. Defaults to "deleted" inside implementation.
   debug: 0, // TODO: Start using debug flag across the module
   incmap: null,
-  otypetrans: {} // Object type transformations: mapping of otype to transformation CB
+  otypetrans: {}, // Object type transformations: mapping of otype to transformation CB. TODO: Allow 1) any preop (is this better name?) - NOT 2) Term of request.
+  postopcb: {"insert":null, "update":null, "select":null, "delete":null} // Post op (success) callbacks for various CRUD ops. Can be used e.g. modification logging.
+               // - Must be keyed by SQL-reminiscent op name "insert", "update", "select", "delete" (cb is for now shared between multi-entry variant)
+               // - Will have access to HTTP request (object) for maximum app-level functional flexibility (e.g. access to user session, that crudrest does not know about)
+               // - Signature: (ent, req)
+               // Register by: ...
 };
+
+/************************************* ACCESSORS and HELPER OPS **********************************/
+
+/** Set Sequelize ORM/persister config.
+ * Persister cache should be pre-indexed as described by documentation main page.
+ * 
+ * @param {object} pc - Indexed ORM map (or Array for auto-indexing by crudrest module)
+ * @param {object} sequelize - Optional Sequelize instance for Array usecase described for first (pc) parameter
+ * @todo Create example
+ */
+function setperscache (pc, sequelize) {
+  // TODO: Allow array form to be passed. Problem: we depend on sequelize, must be passed for case "Array"
+  if (Array.isArray(pc) && sequelize) {
+     pc.forEach(function (item) {
+       var tn = item[1].tableName;
+       perscache[tn] = sequelize.define(tn, item[0], item[1]);
+     });
+     return;
+  }
+  // Direct pre-indexed format assignment
+  perscache = pc;
+}
+/** Set Table / Attribute index for the Options and Autocomplete.
+ * This is *only* needed if opt_or_ac is used.
+ */
+function settaidx(pc) {taidx = pc;}
+
 /** Internal static method to create ID based filter for Sequelize CRUD Operations.
  * The crudrest module convention requires to have parameter ":idval"
  * in the route URL, which will be used here to resolve entry id.
@@ -46,7 +82,7 @@ function getidfilter (smodel, req) {
    var idf = {where: whereid, limit: 1};
    return idf;
 }
-/* Internal method to convert rawfilter to Sequelize format filter.
+/* Internal method to convert rawfilter (e.g. URL query params) to Sequelize format filter.
  * This only adds a "where" object layer to raw filter passed in.
  * @todo Allow wildcarding, etc.
  */
@@ -99,7 +135,7 @@ function getpersister (otype, res) {
    if (pers = perscache[otype]) {return pers;}
    // Invalid persister, custom error handling. Ensure request is ended.
    var emsg = "Not a valid entity type."; // Keep high level.
-   var jerr = {"ok" : 0, "msg": emsg};
+   // var jerr = {"ok" : 0, "msg": emsg};
    // Override jerr ? TODO: Use sendcruderror();
    // if (errcb) { jerr = errcb(otype, emsg); }
    sendcruderror(emsg, null, res);
@@ -164,18 +200,21 @@ function opts(cropts_p) {
   if (cropts_p) {cropts = cropts_p;}
   return(cropts);
 }
-// Test if the Sequelize model for a schema has the named attribute.
-// @param {object} model - Sequelize model definition
-// @param {string}  attr - Attribute name expected to be found in schema model
-// @return Tru3e (1) value for attribute found, False (0) for not found.
+/** Test if the Sequelize model for a schema has the named attribute.
+* @param {object} model - Sequelize model definition
+* @param {string}  attr - Attribute name expected to be found in schema model
+* @return True (1) value for attribute found, False (0) for not found.
+*/
 function hasattribute (model, attr) {
    if (typeof model !== 'object') {return 0;}
-   // TODO: Find out if there is high-level Sequelize accessor for this.
+   // TODO: Find out if there is high-level Sequelize accessor for this. Does not seem to be.
    if (model.tableAttributes[attr]) {return 1;}
    return 0;
 }
 /* Internal / Unofficial / Experimental helper method to allow (GET) loading composite structures.
-* Applicable for getting single / multiple entries.
+* Applicable for for both getting single / multiple entries (Sequelize "include" mechanism is universal to
+* to both use cases).
+* Adds include member to the filter object as a side effect
 * Sends crud error response as a side effect.
 * 
 * @param {object} req - Request with optional :inc route parameter (for inclusion profile label from route URL)
@@ -184,16 +223,16 @@ function hasattribute (model, attr) {
 * @todo Weed out automatic err resp. from here to have more caller flexibility. Throw errors ?
 */
 function addfindinclusions (req, resp, filter) {
-  var inclbl = req.params['inc'];
+  var inclbl = req.params['inc']; // Allow this to come from various places or ONLY from req.params ?
   if (!inclbl) { return 0; } // No Inclusions
   if (!filter) { sendcruderror("No filter passed", null, resp); return -1; }
   if (typeof filter != "object") { sendcruderror("Filter must be an object", null, resp); return -1; }
   // Mandate inclbl to be in dot-not ?
   // var m = inclbl.match(/^(\w+)\.(\w+)$/);
   // if (!m) { sendcruderror("Inclusion label not in correct format", null, resp); return -1; }
-  var incmap = cropts[incmap];
+  var incmap = cropts["incmap"];
   if (!incmap) { sendcruderror("No Inclusion map gotten", null, resp); return -1; }
-  var inc = incmap[inclbl]; // Array (as dictated by Sequelize). 
+  var inc = incmap[inclbl]; // Should result in Array (as dictated by Sequelize).
   if (!Array.isArray(inc)) { sendcruderror("Inclusion map not in array!", null, resp); return -1; }
   // TODO: Check type from inclbl (in t.prof dot-notation ?) ? OR ... trust passed inc ?
   // Based on empiric evidence Sequelize does *something* to include definition that makes it non-usable
@@ -333,7 +372,21 @@ function sendcrudresp(ent_or_rdata, operlbl) {
   // if (respcb) { jr = respcb(ent_or_data, operlbl); }
   //res.json(jr);
 }
-/* ************************* CRUD ************************** */
+
+
+// Generate a very simple SQL (AND-based) filter out of a filter-object
+// TODO: Check attrs validity in regards to model (pass: model, fobj).
+// @param {object} fobj - Filter Object
+function filter2sql(fobj) {
+  // Check Object param validity
+  // if (!) {return "";}
+  var wcomp = [];
+  Object.keys(fobj).forEach(function (k) { wcomp.push(fobj[k]); });
+  return wcomp.join(" AND ");
+}
+
+
+/* ************************* CRUD OPS ************************** */
 
 /** Insert/Create a single entry of type by HTTP POST.
  * Route pattern must have params: ":type"
@@ -377,6 +430,7 @@ function crudpost(req, res) {
     if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
     var rd = respcb ? respcb(ent, "create") : ent;
     res.send(rd);
+    //if (postopcb.insert) {postopcb.insert();}
   })
   .catch(function (ex) {sendcruderror("Creation problem ",ex,res); return; });
   // Multi-insert. NOTE: bulkCreate() will return null for auto-incrementing ID. Only attrs stored will
@@ -439,6 +493,7 @@ function crudput (req, res) {
       var ok = req.crudupdateok(ent.get(), req.body, req); // entry, req TODO: oldent, update, req
       if (!ok) { sendcruderror("Not authorized for update", null, res);return; }
     }
+    // Only now update as we are sure entry is there in the DB.
     smodel.update(req.body, idfilter) // options.limit (mysql)
     // Alternative method (Sequelize ~2012): ent.updateAttributes(req.body).success(...)
     // This seems to gain: [1]. Need to run find()
@@ -448,9 +503,10 @@ function crudput (req, res) {
       smodel.find(idfilter)
       .then(function (ent) {
         console.log("Updated: ", ent.get());
-	if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
+        if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
         var rd = respcb ? respcb(ent, "update") : ent;
         res.send(rd);
+        //if (postopcb.update) {postopcb.update();}
       })
       .catch(function (ex) {sendcruderror("Updated ent reload failure",ex,res); return; });
       
@@ -550,6 +606,7 @@ function cruddelete (req, res) {
     // if (!num) {return;} // Earlier exception
     var d = respcb ? respcb(jr, "delete") : jr; // What to do on delete ?? Common pattern ok ?
     res.send(d);
+    //if (postopcb.delete) {postopcb.delete();}
   },
   function(err) { sendcruderror(err.basemsg, err, res); });
 }
@@ -583,6 +640,7 @@ function crudgetsingle (req, res) {
     if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
     var rd = respcb ? respcb(ent, "retrieve") : ent; // FIXME: ent may be null (should not be by now, see above check)
     res.send(rd);
+    //if (postopcb.select) {postopcb.select();}
   })
   .catch(function (ex) {sendcruderror("No Entry Found",ex,res);});
 }
@@ -678,6 +736,7 @@ function crudgetmulti (req, res)  {
     }
     var rd = respcb ? respcb(arr, "retrieve") : arr;
     res.send(rd);
+    //if (postopcb.select) {postopcb.select();}
   })
   // .catch(function (ex) {jr.ok = 0;jr.msg = ex.message;res.send(jr);})
   .catch(function (ex) {sendcruderror("No Entries Found.",ex,res);});
@@ -688,15 +747,6 @@ function crudgetmulti (req, res)  {
   // var i = 1;joined.unshift(otype);
   // var joins = joined.map(function (jt) { return " NATURAL JOIN "+jt; });
   // seq.query("SELECT "+otype+".* "+addattrs+" FROM "+otype+"");
-}
-// Generate a very simple SQL (AND-based) filter out of a filter-object
-// TODO: Check attrs validity in regards to model (pass: model, fobj).
-function filter2sql(fobj) {
-  // Check Object param validity
-  // if (!) {return "";}
-  var wcomp = [];
-  Object.keys(fobj).forEach(function (k) { wcomp.push(fobj[k]); });
-  return wcomp.join(" AND ");
 }
 
 /** Execute multi-faceted CUD (Create AND/OR Update AND/OR Delete) Operation
@@ -714,7 +764,7 @@ function filter2sql(fobj) {
  * - There is no support for softdelete (currently)
  * Recommended CRUD PUT URL: /:type/
  * 
- * Data example (commented with JSON-violating JS comments for clarity):
+ * Data example (commented with JSON-violating JS comments for clarity) for understanding how particular CRUD operation is derived from each entry:
  *
  *      [
  *        {"name":"Luke Jefferson"}, // C - Create (has no ID, no deleted flag)
@@ -778,7 +828,11 @@ function mixedbatchmod(req, res) {
   function processcrudpromise (pr, cb) {
     // Way to probe what kind of promise we're dealing with ?
     if (debug > 2) { console.log("Processing Promise " + i); i++; }
-    pr.then(function (somedata) { cb(null, "ok"); }).catch(function (ex) { cb(ex, null); });
+    pr.then(function (somedata) {
+      cb(null, "ok");
+      // Note: Do we know which is the ongoing promise ? Need to pass object to  async.map() ?
+    })
+    .catch(function (ex) { cb(ex, null); });
   }
   // TODO: Treat promises like "data params" and use async.map() to process them
   async.map(arr_prom, processcrudpromise, function(err, results) {
@@ -790,10 +844,15 @@ function mixedbatchmod(req, res) {
     var rd = respcb ? respcb(jr, "mixedop") : jr;
     // TODO: Return modification statistics
     res.send(rd);
+    // TODO: for postopcb - should we have (potentially) 3 separate calls for each of mixed ops ?
+    // OR should we make a call for each op in processcrudpromise() - see above.
   });
   
   
 }
+
+/******************************** MORE HELPER OPS ************************************************/
+
 
 /** Add Sort/Order components from request parameters to Sequelize filter (if any).
  * Has a side effect of removing all Sort/Order query parameters from request (req) to not
@@ -915,29 +974,7 @@ function defaultrouter(router) {
 // NEW: This is too weird (why was this here ever ?). Eliminated (2017-03).
 // module.exports.router = router; // ????
 
-/** Set Sequelize ORM/persister config.
- * Persister cache should be pre-indexed as described by documentation main page.
- * 
- * @param {object} pc - Indexed ORM map (or Array for auto-indexing by crudrest module)
- * @param {object} sequelize - Optional Sequelize instance for Array usecase described for first (pc) parameter
- * @todo Create example
- */
-function setperscache (pc, sequelize) {
-  // TODO: Allow array form to be passed. Problem: we depend on sequelize, must be passed for case "Array"
-  if (Array.isArray(pc) && sequelize) {
-     pc.forEach(function (item) {
-       var tn = item[1].tableName;
-       perscache[tn] = sequelize.define(tn, item[0], item[1]);
-     });
-     return;
-  }
-  // Direct pre-indexed format assignment
-  perscache = pc;
-}
-/** Set Table / Attribute index for the Options and Autocomplete.
- * This is *only* needed if opt_or_ac is used to 
- */
-function settaidx(pc) {taidx = pc;}
+
 
 // module.exports = {
 // Helper methods
