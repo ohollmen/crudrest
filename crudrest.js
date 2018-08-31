@@ -36,8 +36,8 @@ var cropts = {
   postopcb: {"insert":null, "update":null, "select":null, "delete":null} // Post op (success) callbacks for various CRUD ops. Can be used e.g. modification logging.
                // - Must be keyed by SQL-reminiscent op name "insert", "update", "select", "delete" (cb is for now shared between multi-entry variant)
                // - Will have access to HTTP request (object) for maximum app-level functional flexibility (e.g. access to user session, that crudrest does not know about)
-               // - Signature: (ent, req)
-               // Register by: ...
+               // - Signature: (ent, req) TODO: Refine !!!
+               // Register by: crudrest.opts().postopcb["insert"] = function (...) {...};
 };
 
 /************************************* ACCESSORS and HELPER OPS **********************************/
@@ -401,7 +401,6 @@ function filter2sql(fobj) {
 // Note: ER_BAD_FIELD_ERROR: Unknown column 'id' in 'field list'
 // ... Table does not have primary key
 function crudpost(req, res) {
-  // res.setHeader('Content-Type', 'text/json'); /// Let app middleware handle this collectively.
   console.log("POSTed JSON: " + JSON.stringify(req.body, null, 2));
   // console.log("User is-a: " + User); //  [object SequelizeModel]
   var otype = req.params['type'];
@@ -411,9 +410,8 @@ function crudpost(req, res) {
   // Lookup persister
   var smodel = getpersister(otype, res); //  [object SequelizeModel]
   // Not twice: jr.ok = 0;jr.msg = "No Model";res.send(jr);
-  if (!smodel) {return;}
-  //console.log("POST Dump: ", req.body);jr.id = 6666666;jr.msg = "Things ok in debug mode";
-  //res.send(jr);return; // DEBUG
+  if (!smodel) {return;} // TODO: CRUD ERROR
+  //TODO: var crudopctx = {otype: otype, smodel: smodel, req: req, res: res, oplbl: "insert"};
   // Intercept with a callback (validate, add timestamps, check access permissions ...)
   // var f = preproc(smodel); // 'create'
   // if (f) {f( req.body, req, smodel);} // apply ...
@@ -422,7 +420,7 @@ function crudpost(req, res) {
   // Whats diff. with bulkCreate() (?):
   // bulkCreate will not have autoinc attributes, bulkCreate (also) supports fields:[...]
   // sendcruderror("Insert: Not an object.",ex,res);
-  if (Array.isArray(req.body)) { crudpostmulti(req.body); return;}
+  if (Array.isArray(req.body)) { crudpostmulti(req.body); return;} // MULTIPLE
   smodel.create(req.body)
   .then(function (ent) {
     if (!ent) {console.log("Likely earlier exception");return;} // Earlier exception
@@ -430,7 +428,7 @@ function crudpost(req, res) {
     if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent.get(), req); }
     var rd = respcb ? respcb(ent, "create") : ent;
     res.send(rd);
-    //if (postopcb.insert) {postopcb.insert();}
+    //if (postopcb.insert) {postopcb.insert();} // ent.get();
   })
   .catch(function (ex) {sendcruderror("Creation problem ",ex,res); return; });
   // Multi-insert. NOTE: bulkCreate() will return null for auto-incrementing ID. Only attrs stored will
@@ -443,12 +441,13 @@ function crudpost(req, res) {
     console.log("opts:", opts);
     smodel.bulkCreate(arr, opts)
     .then(function (ent) {
-      if (!ent) { console.log("Likely earlier exception (case-multi)");return; }
+      if (!ent) { console.log("Likely earlier exception (case-multi)");return; } // From days of catch ordering problem !
       // TODO: What is ent here (as passed by Sequelize) ? Array ? count ?
       // Need to do: ents.forEach(function (ent) { cropts.otypetrans[otype](ent, req); } ); ???
       // if (cropts.otypetrans[otype]) { cropts.otypetrans[otype](ent, req); } // Unlikely
       var rd = respcb ? respcb(ent, "create") : ent;
       res.send(rd);
+      //if (postopcb.insert) {postopcb.insert();} // arr (must arr.map(function (ent) { return ent.get(); }) with ent.get() ?)
     })
     .catch(function (ex) {sendcruderror("Multi-Creation problem ",ex,res);});
   }
