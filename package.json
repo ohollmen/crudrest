@@ -11,7 +11,7 @@
     "url": "https://github.com/ohollmen/crudrest.git"
   },
   "dependencies": {
-    "sequelize":"^3.20.0",
+    "sequelize":"^6.3.5",
     "async": "1.5.2",
     "bluebird": "^3.0.0"
   },
