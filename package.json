@@ -11,16 +11,18 @@
     "url": "https://github.com/ohollmen/crudrest.git"
   },
   "dependencies": {
-    "sequelize":"^3.20.0",
     "async": "1.5.2",
-    "bluebird": "^3.0.0"
+    "bluebird": "^3.0.0",
+    "sequelize": "^3.20.0"
   },
   "devDependencies": {
     "express": "~4.12.4",
-    "eslint" : "~0.23.0",
-    "mysql" : "~2.7.0",
-    "sqlite3" : "~3.0.8",
     "node-getopt": "~0.2.3"
+  },
+  "optionalDependencies": {
+    "eslint": "~0.23.0",
+    "mysql": "~2.7.0",
+    "sqlite3": "~3.0.8"
   },
   "keywords": [
     "CRUD",
@@ -28,6 +30,9 @@
     "ORM",
     "Persistence"
   ],
+  "scripts": {
+    "jsdoc": "jsdoc *.js -R README.md -c jsdoc.conf.json"
+  },
   "author": "Olli Hollmen",
   "license": "MIT"
 }
