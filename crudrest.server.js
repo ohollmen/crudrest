@@ -33,10 +33,13 @@
        var config = {
          "httpport" : 3001, // Port for Node/Express
          "staticroot": "./public/", // Static files docroot path
+	 "crudpath": "/",
          "sequelizeconfig": './hosts.sequelize.model.conf.js',
+	 //"optconfig": "",
+	 "jsonindent": 2,
          "dbconn": {
            "dialect": "mysql", // "sqlite"
-           "host": "db",
+           "host": "mydbhost",
            "database": "mydb",
            "user": "mrx",
            "password": "s3Crt",
@@ -46,6 +49,8 @@
        };
        module.exports = config;
 
+ * The location of this main config can be give on command line (--maincfg) or via environment
+ * variable CRUDREST_MAIN_CFG.
  */
 'use strict;';
 var Sequelize = require('sequelize');
@@ -59,47 +64,52 @@ var aspec = [
 var getopt = new Getopt(aspec);
 // console.log(process.argv);
 var opt = getopt.parseSystem();
-var seqpath = process.env['SEQ_PATH'];
+//var seqpath = process.env['SEQ_PATH'];
 // Grab app and connection config from argv
 // Also: http://stackoverflow.com/questions/4351521/how-to-pass-command-line-arguments-to-node-js
 //process.argv.forEach(function (val, index, array) {console.log(index + ': ' +val);});
 // console.log(process.argv);
-if (process.argv.length < 3) {throw "Need at least one arg (mainconfig)!"; }
+//if (process.argv.length < 3) {throw "Need at least one arg (mainconfig)!"; }
 //OLD: var cfgname = process.argv[2];
-var cfgname = process.argv.pop(); // Last arg
-if (!cfgname) { console.log("Pass Main Config name (as last arg) on the command line");process.exit(0); }
-console.log(opt);
+var cfgname = (process.argv.length > 2) ? process.argv.pop() : ''; // Last arg
+if (process.env["CRUDREST_MAIN_CFG"] && !cfgname) { cfgname = process.env["CRUDREST_MAIN_CFG"]; } // should not override CLI
+if (!cfgname) { console.log("Pass Main Config name (as last arg) on the command line or env CRUDREST_MAIN_CFG");process.exit(0); }
+console.log("CL Opts: ", opt);
 
+/*
 if (0) {
   var cfgok = fs.existsSync(cfgname);
   if (!cfgok) {console.log("Main Config ("+cfgname+") not there");process.exit(0);}
   // Allow anything that require() can use (.js or .json)
   var cfg = require(cfgname); // e.g. "./APPID.conf.json"
 }
-var cfg = loadconfig(cfgname, "Main Config", {});
-
+*/
+var cfg = loadconfig(cfgname, "CRUDREST Main Config", {});
+console.log(cfg);
 var dbopts = cfg.dbconn;
 if (!dbopts) { console.log("Config must have member 'dbconn' to describe DB connectivity"); process.exit(1); }
-dbopts.dbname = dbopts.database; // sequelize compat.
+dbopts.dbname = dbopts.database; // sequelize compat. TODO: if (dbopts.database) {}
 dbopts.username = dbopts.user;
 // Instantiate Sequelize with params given in config.
 var sequelize = new Sequelize(dbopts.dbname, dbopts.username, dbopts.password, dbopts);
 // Load Sequelize config. Either: name passed from CL OR name found in config.
-
-var seqcfg = opt.options.seqcfg || cfg.sequelizeconfig; // OR ...
+// Prefer Env. for maximum flexibility.
+var seqcfg = process.env["CRUDREST_SEQ_CFG"] || opt.options.seqcfg || cfg.sequelizeconfig; // OR ...
 
 //var seqcfgok = fs.existsSync(seqcfg);
 //if (!seqcfgok) {console.log("Sequelize Config ("+seqcfg+") not there");process.exit(0);}
 //var pseq = require(seqcfg);
 
-var pseq = loadconfig(seqcfg, "Sequelize Config", {});
+var pseq = loadconfig(seqcfg, "Sequelize Model Config", {});
 var optconfarr;
 var taidx;
-if (cfg.optconfig) {
-  var optcfgok = fs.existsSync(cfg.optconfig);
-  if (!optcfgok) {console.log("Opt. Config not there");process.exit(0);}
-  optconfarr = require(cfg.optconfig);
-  // optconfarr = loadconfig(cfg.optconfig, "Opt. Config", {});
+var optcfg = process.env["CRUDREST_OPT_CFG"] || cfg.optconfig;
+if (optcfg) {
+  //var optcfgok = fs.existsSync(cfg.optconfig);
+  //if (!optcfgok) {console.log("Opt. Config not there");process.exit(0);}
+  //optconfarr = require(cfg.optconfig);
+  optconfarr = loadconfig(optcfg, "Opt. Config", {});
+  if (!Array.isArray(optconfarr)) { console.error("Opt. Config not in an array !"); process.exit(1); }
   // Index items, set to module var later.
   taidx = {};
   // Index opts / ac config
@@ -110,12 +120,15 @@ if (cfg.optconfig) {
 ////////////////////////////////////////////////////////////////
 // TODO: Move this as a method into crudrest ?
 var perscache = {};
-if (!pseq.sargs) {throw "No sargs member is sequelize config: " + seqcfg;}
+if (!pseq.sargs) {throw "No 'sargs' member is sequelize model config: " + seqcfg;}
 // INLOOP: console.log(tn + " " + JSON.stringify(item));
+/*
 pseq.sargs.forEach(function (item) {
   var tn = item[1].tableName;
   perscache[tn] = sequelize.define(tn, item[0], item[1]);
 });
+*/
+
 // GENERAL NOTE: Never let Sequelize sync the schema - fields will be unordered (!).
 // pseq.syncschema(sequelize); // From inside config
 // sequelize.sync().then(function () {console.log("Synced the schema");});
@@ -129,8 +142,8 @@ var express  = require('express');
 var crudrest = require('./crudrest'); // crudrest.js
 // var router = crudrest.router; // Use crudrest router for AC + CRUD
 // NEW:
-
-crudrest.setperscache(perscache); // ORM cache / pool
+crudrest.setperscache(pseq.sargs, sequelize);
+// Not Needed (See above): crudrest.setperscache(perscache); // ORM cache / pool
 if (taidx) {crudrest.settaidx(taidx);}
 
 // Boilerplate express server setup
