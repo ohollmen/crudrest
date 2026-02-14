@@ -42,12 +42,23 @@ var cropts = {
 
 /************************************* ACCESSORS and HELPER OPS **********************************/
 
-/** Set Sequelize ORM/persister config.
- * Persister cache should be pre-indexed as described by documentation main page.
+/** Set Sequelize ORM/persister config within module
+ * There are 2 ways of setting up persisters
+ * - Pre-initialized persister cache Object (keyed by table names)
+ * - initialize persisters from an Array form with outer array containing arrays of (fixed) 2 object elements that are the table config and attribute config for one table as explained in documentation for sequelize.define(tabname, attrcfg, tabcfg);
+ *
+ * Persister cache (Object form) should be pre-indexed as described by documentation main page.
  * 
  * @param {object} pc - Indexed ORM map (or Array for auto-indexing by crudrest module)
  * @param {object} sequelize - Optional Sequelize instance for Array usecase described for first (pc) parameter
- * @todo Create example
+ * Pass pre-populated persister cache
+ *
+ *      setperscache(pc);
+ *
+ * Load sequelize config from external file with array of 2-element inner arrays (of attr,table config pair).
+ *
+ *      var seqcfg = require("myapp.seq.model.js");
+ *      setperscache(seqcfg);
  */
 function setperscache (pc, sequelize) {
   // TODO: Allow array form to be passed. Problem: we depend on sequelize, must be passed for case "Array"
@@ -61,6 +72,8 @@ function setperscache (pc, sequelize) {
   // Direct pre-indexed format assignment
   perscache = pc;
 }
+
+
 /** Set Table / Attribute index for the Options and Autocomplete.
  * This is *only* needed if opt_or_ac is used.
  */
@@ -103,6 +116,7 @@ function kvfilter (rawfilter) { // (req)
 *     crudrest.seterrhdlr(function (typename, errmsg) {
 *       return {"status": "err", "msg": errmsg + ". Type: " + typename};
 *     });
+*
 * @param {function} f - Error callback function
 */
 function seterrhdlr(f) {
