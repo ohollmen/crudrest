@@ -1,9 +1,10 @@
-# cruderst
+# crudrest
 
 Sequelize based REST CRUD persistence.
 
 ## Example of usage:
 
+```
     var crudrest = require('crudrest');
     var express  = require('express');
     ...
@@ -12,8 +13,9 @@ Sequelize based REST CRUD persistence.
     var router = express.Router({caseSensitive: 1});
     crudrest.defaultrouter(router);
     app.use('/ents', crudrest);
+```
 
- For a more comprehensive example see the example test app crudrest.server.js in the module distribution.
+For a more comprehensive example see the example test app crudrest.server.js in the module distribution.
 
 ## Example Sequelize Config
 
@@ -22,6 +24,7 @@ crudrest utilizes Sequelize and the associated Sequelize schema (table and attri
 any faulty persistence ops with invalid tables or attributes get intercepted and turned into REST exceptions.
 Sequelize configs for the whole app must be stored in a config file with following (wrapping) structure:
 
+```
     // myapp.sequelize.conf.js
     var seqconfig = [
       // Sequelize Attribute, Table config for the first table ...
@@ -43,9 +46,11 @@ Sequelize configs for the whole app must be stored in a config file with followi
   
     ];
     module.exports.sargs = seqconfig;
+```
 
 This can be then mapped into an index by entity types (see "tableName" below) that crudrest can use as-is:
 
+```
      var seqcfg = require("./myapp.sequelize.conf.js");
      var perscache = {};
      seqcfg.forEach(function (item) {
@@ -54,24 +59,29 @@ This can be then mapped into an index by entity types (see "tableName" below) th
      });
      // Let crudrest know about your ORM Model config
      crudrest.setperscache(perscache);
+```
 
 ## Associating Server URL routes to crudrest handlers
 
 Example above (on top) showed a way to associate URL:s in a default way
 
+```
     var router = express.Router({caseSensitive: 1});
     crudrest.defaultrouter(router);
     app.use('/ents', router);
+```
 
 To gain more control and actually "see" the associations you can do router assignments individually
 (loading and initialization of crudrest and instantiation of Express router are left out):
 
+```
     // All crudrest handlers are "mounted" under "/crud/"
     router.post  ("/crud/:type", crudrest.crudpost); // POST 1 arg: type
     router.put   ("/crud/:type/:idval", crudrest.crudput); // PUT 2 args: type,id
     router.delete("/crud/:type/:idval", crudrest.cruddelete); // DELETE 2 args: type,id
     router.get   ("/crud/:type/:idval", crudrest.crudgetsingle); // GET (single) 2 args: type,id
     router.get   ("/crud/:type", crudrest.crudgetmulti); // GET(multiple) 1 arg: type
+```
 
 If you are bit on the hard-core side you'll probably want to do something like above
 (its still relatively terse).
@@ -94,6 +104,7 @@ Crudrest allows one to customize the response for success and error cases with a
 (applicable to all CRUD methods).
 The REST error / exception response and success response are customizable by setting the callbacks via methods seterrhdlr() and setrespcb() respectively:
 
+```
     // Set error / exception handler
     crudrest.seterrhdlr(function (typename, errmsg) {
       return {"status": "err", "msg": errmsg + ". Type: " + typename};
@@ -102,12 +113,14 @@ The REST error / exception response and success response are customizable by set
     crudrest.setrespcb(function (origdata, op) {
       return {"status": "ok", "data": origdata};
     });
+```
 
 ## Intercepting CRUD requests
 
 Instead of assigning handlers directly URL routes, you can allow your app to intercept
 the request:
 
+```
     router.get("/crud/:type/:idval", function (req, res) {
        // Do something here
        jerr = {"ok": 0, "msg":"Bad activity intercepted"};
@@ -115,6 +128,7 @@ the request:
        if (!valididformat(req.params['idval'])) {jerr.msg += ". Faulty ID format";req.json(jerr);return;}
        crudrest.crudgetsingle(req, res); // .. Only then call "raw" handler
     });
+```
 
 Now handler crudrest.crudgetsingle is indirectly assigned to URL route.
 
@@ -149,7 +163,9 @@ Soft-delete is not supported yet. Multiple entry / batch delete does not exist (
 
 In the project top directory run jsdoc:
 
+```
     jsdoc crudrest.server.js crudrest.js -R README.md -c jsdoc.conf.json
+```
 
 More on JSDoc: http://usejsdoc.org/
 
